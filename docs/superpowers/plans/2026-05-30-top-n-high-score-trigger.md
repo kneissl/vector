@@ -98,15 +98,23 @@ def test_compute_threshold_all_zero():
 
 
 # --- is_phantom_slot ---
-def test_is_phantom_untouched_seed():
+def test_is_phantom_untouched_seed_across_band():
+    # lowest slot (threshold) plus the three filler slots above it
     assert st.is_phantom_slot("", 5000, 5000) is True
+    assert st.is_phantom_slot("", 5001, 5000) is True
+    assert st.is_phantom_slot("", 5002, 5000) is True
+    assert st.is_phantom_slot("", 5003, 5000) is True
     assert st.is_phantom_slot("   ", 5000, 5000) is True
-    assert st.is_phantom_slot("???", 5000, 5000) is True
+    assert st.is_phantom_slot("???", 5003, 5000) is True
+
+
+def test_is_phantom_just_above_band_not_phantom():
+    assert st.is_phantom_slot("", 5004, 5000) is False
 
 
 def test_is_phantom_real_claimable_blank_not_phantom():
     # beat the threshold but skipped initials -> must stay claimable
-    assert st.is_phantom_slot("", 6000, 5000) is False
+    assert st.is_phantom_slot("", 60000, 5000) is False
 
 
 def test_is_phantom_real_player_not_phantom():
@@ -135,6 +143,7 @@ bundled into every platform build via src/common.
 
 DEFAULT_CUTOFF = 10
 MAX_CUTOFF = 20  # leaders store capacity
+SEED_BAND = 3  # filler slots seeded just above the threshold (4-slot table -> +1,+2,+3)
 
 
 def clamp_cutoff(value, leaders_count=MAX_CUTOFF):
@@ -166,16 +175,17 @@ def compute_threshold(leaders, n):
 
 
 def is_phantom_slot(initials, score, threshold):
-    """True when a machine high-score slot is an untouched seeded threshold.
+    """True when a machine high-score slot is an untouched seeded slot.
 
-    A leftover seed reads back at exactly the threshold with blank initials. A
-    real qualifying score is always strictly greater than the threshold, so it
-    is never mistaken for a seed — preserving the "allow claim" feature for
-    blank real scores.
+    Seeded slots occupy the band [threshold, threshold + SEED_BAND] (the lowest
+    slot at the threshold plus filler slots just above it) and carry blank
+    initials. A real qualifying score is orders of magnitude larger than the
+    threshold, so it never lands in the band — preserving the "allow claim"
+    feature for blank real scores far above the threshold.
     """
     if threshold <= 0:
         return False
-    if score != threshold:
+    if not (threshold <= score <= threshold + SEED_BAND):
         return False
     if initials is None:
         return True
@@ -185,7 +195,7 @@ def is_phantom_slot(initials, score, threshold):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest dev/tests/test_score_threshold.py -v`
-Expected: PASS — all 14 tests pass.
+Expected: PASS — all 15 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -420,7 +430,7 @@ git commit -m "feat: persist top_n_cutoff in wpc extras record"
 After the existing `import` block at the top of `src/common/ScoreTrack.py` (after `from Shadow_Ram_Definitions import shadowRam`), add:
 
 ```python
-from score_threshold import clamp_cutoff, compute_threshold, is_phantom_slot
+from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, is_phantom_slot
 ```
 
 - [ ] **Step 2: Add the `_seed_threshold` module global**
@@ -488,10 +498,12 @@ with:
 def _remove_machine_scores():
     """Prep the machine high-score table for forced initials entry.
 
-    When a top-N threshold applies, seed all four slots with the Nth-place
-    leaderboard score so the machine only prompts players who BEAT it. When the
-    board is not yet full (threshold 0) or on-machine entry is off, fall back to
-    zeroing the slots so every score qualifies (original behavior).
+    When a top-N threshold applies, seed the four slots so the lowest slot equals
+    the Nth-place leaderboard score and the three slots above it are
+    threshold+1/+2/+3 (sentinel initials) — keeping the table validly descending
+    while gating prompts on beating the threshold. When the board is not yet full
+    (threshold 0) or on-machine entry is off, fall back to zeroing the slots so
+    every score qualifies (original behavior).
     """
     global _seed_threshold
 
@@ -512,7 +524,8 @@ def _remove_machine_scores():
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
             if _seed_threshold > 0:
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold)
+                # index 0 (1st place) = threshold+3 ... index 3 (lowest) = threshold
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
                 for i in range(3):
                     shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
             else:
@@ -528,7 +541,7 @@ def _remove_machine_scores():
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
             if _seed_threshold > 0:
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold)
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
                 for i in range(3):
                     shadowRam[initial_start + i] = 0x00  # sentinel initials -> reads blank
             else:
@@ -567,7 +580,7 @@ git commit -m "feat: seed top-N threshold in common ScoreTrack"
 After the existing import block at the top of `src/wpc/ScoreTrack.py` (after `from Shadow_Ram_Definitions import shadowRam`), add:
 
 ```python
-from score_threshold import clamp_cutoff, compute_threshold, is_phantom_slot
+from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, is_phantom_slot
 ```
 
 - [ ] **Step 2: Add the `_seed_threshold` module global**
@@ -638,9 +651,11 @@ with:
 def _remove_machine_scores(GrandChamp="Max"):
     """Prep the machine high-score table for forced initials entry - WPC.
 
-    Seed all four slots with the top-N threshold so the machine only prompts
-    players who BEAT it; fall back to zeroing when the board is not yet full.
-    The GrandChamp="Zero" path (leaderboard reset) always zeroes.
+    Seed the four slots so the lowest equals the top-N threshold and the three
+    above it are threshold+1/+2/+3 (sentinel initials) — a validly descending
+    table that only prompts players who BEAT the threshold. Fall back to zeroing
+    when the board is not yet full. The GrandChamp="Zero" path (leaderboard
+    reset) always zeroes.
     """
     global _seed_threshold
 
@@ -658,7 +673,8 @@ def _remove_machine_scores(GrandChamp="Max"):
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * S.gdata["HighScores"]["InitialSpacing"]
 
             if _seed_threshold > 0:
-                shadowRam[score_start : score_start + S.gdata["HighScores"]["BytesInScore"]] = _int_to_bcd(_seed_threshold)
+                # index 0 (1st place) = threshold+3 ... index 3 (lowest) = threshold
+                shadowRam[score_start : score_start + S.gdata["HighScores"]["BytesInScore"]] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
                 for i in range(3):
                     shadowRam[initial_start + i] = 0x20  # space sentinel -> reads blank
             else:
@@ -1037,7 +1053,7 @@ git commit -m "chore: bump common + wpc versions for top-N trigger"
 - [ ] **Step 1: Run the full CPython test suite**
 
 Run: `python -m pytest dev/tests/ -v`
-Expected: PASS, including the 14 new `test_score_threshold.py` tests and the existing suite.
+Expected: PASS, including the 15 new `test_score_threshold.py` tests and the existing suite.
 
 - [ ] **Step 2: Syntax-check every modified on-device module**
 
@@ -1059,7 +1075,7 @@ Flash a System 11 unit (`buildsys11.bat`) and a WPC unit (`buildwpc.bat`), then 
 3. Player beats threshold but skips initials entry: the score is still claimable via the web UI ("allow claim" preserved).
 4. After a game, the claimable-scores list shows only real entered/qualifying scores — no phantom threshold-valued entries.
 5. WPC: grand champion + high-score checksum remain valid; machine boots and shows correct attract-mode high scores.
-6. Equal-slot acceptance: confirm the machine accepts four equal threshold slots and prompts correctly. If a machine rejects equal slots, apply the §1 "Hardware risk" fallback (seed only the lowest slot at the threshold, upper three at the real higher leaderboard scores).
+6. Descending-table acceptance: confirm the machine prompts correctly with the `threshold+3 … threshold` filler table (lowest slot == threshold). A player scoring below the 10th-place value should NOT be prompted; a player above it should be.
 7. Admin UI: the cutoff input loads the stored value, disables when On-Machine is off, and persists edits (reload the page and confirm).
 
 - [ ] **Step 4: Finalize the branch**
@@ -1073,4 +1089,5 @@ Use the superpowers:finishing-a-development-branch skill to decide merge/PR/clea
 - **Import resolution:** `from score_threshold import ...` works on-device because `dev/build.py` flattens `src/common/*` and the platform dir into one directory. In unit tests the module is reached via the `sys.path.insert` in `test_score_threshold.py`.
 - **`other` field repurposing:** the `other` extras field was round-tripped but referenced nowhere else; it now backs `top_n_cutoff`. The `"other"` key is left in the read dict for compatibility but is no longer authoritative.
 - **Backward compatibility:** existing units store `other == 0`, which `clamp_cutoff` resolves to 10 — so On-Machine units move from "prompt every game" to "prompt for top 10" on upgrade. Call this out in release notes.
-- **Why phantom detection uses `score == threshold`:** the machine only inserts scores that strictly beat its lowest slot, so a real qualifying score is always `> threshold`; an untouched seed is always exactly `== threshold`. Combined with the blank-initials check this never zeroes a genuine claimable score.
+- **Why phantom detection uses the band `[threshold, threshold+3]`:** seeded slots occupy the lowest slot (`threshold`) plus three filler slots (`threshold+1/+2/+3`) just above it. A real qualifying score is orders of magnitude larger than the threshold (the machine only inserts scores that beat its lowest slot, and real pinball scores never land within 3 points of it). Combined with the blank-initials check, this zeroes only untouched seeds and never a genuine claimable score.
+- **Why filler slots instead of real higher leaderboard scores:** real scores carry real initials, survive the readback filter, and would leak into the "recent game"/claim list as stale entries. Synthetic `threshold+k` sentinels read back as phantoms and get dropped.
