@@ -36,6 +36,7 @@ async function getScoreClaimMethods() {
 
   const onMachineToggle = await window.waitForElementById("on-machine-toggle");
   const webUIToggle = await window.waitForElementById("web-ui-toggle");
+  const cutoffInput = await window.waitForElementById("top-n-cutoff-input");
 
   onMachineToggle.checked = data["on-machine"];
   onMachineToggle.disabled = false;
@@ -43,20 +44,32 @@ async function getScoreClaimMethods() {
   webUIToggle.checked = data["web-ui"];
   webUIToggle.disabled = false;
 
-  // Helper function to add event listener to claim method toggle
-  function addClaimMethodToggleListener(toggle) {
-    toggle.addEventListener("change", async () => {
-      const data = {
-        "on-machine": onMachineToggle.checked ? 1 : 0,
-        "web-ui": webUIToggle.checked ? 1 : 0,
-      };
-      await window.smartFetch("/api/settings/set_claim_methods", data, true);
-    });
+  cutoffInput.value = data["top-n-cutoff"];
+  // cutoff only applies when on-machine entry is enabled
+  cutoffInput.disabled = !onMachineToggle.checked;
+
+  async function saveClaimMethods() {
+    const payload = {
+      "on-machine": onMachineToggle.checked ? 1 : 0,
+      "web-ui": webUIToggle.checked ? 1 : 0,
+      "top-n-cutoff": parseInt(cutoffInput.value, 10),
+    };
+    await window.smartFetch("/api/settings/set_claim_methods", payload, true);
   }
 
-  // Apply listener to both toggles
-  addClaimMethodToggleListener(onMachineToggle);
-  addClaimMethodToggleListener(webUIToggle);
+  onMachineToggle.addEventListener("change", async () => {
+    cutoffInput.disabled = !onMachineToggle.checked;
+    await saveClaimMethods();
+  });
+  webUIToggle.addEventListener("change", saveClaimMethods);
+  cutoffInput.addEventListener("change", async () => {
+    // clamp to 1..20 before saving
+    let v = parseInt(cutoffInput.value, 10);
+    if (isNaN(v) || v < 1) v = 1;
+    if (v > 20) v = 20;
+    cutoffInput.value = v;
+    await saveClaimMethods();
+  });
 }
 
 async function getShowIP() {
