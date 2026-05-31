@@ -203,7 +203,6 @@ def deserialize(data, structure_name):
         try:
             enable, other, lastIP, message = struct.unpack("<II20s20s", data)
             return {
-                "other": other,
                 "top_n_cutoff": clamp_cutoff(other),
                 "lastIP": lastIP.decode().strip("\0"),
                 "message": message.decode().strip("\0"),
