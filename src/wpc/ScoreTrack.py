@@ -13,12 +13,14 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
+from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, is_phantom_slot
 import DataMapper
 
 log = logger_instance
 
 rtc = RTC()
 top_scores = []
+_seed_threshold = 0  # Nth-place score seeded into the machine table at game start
 nGameIdleCounter = 0
 
 # hold the last four (plus two older records) games worth of scores.
@@ -166,6 +168,9 @@ def _read_machine_score(UseHighScores=True):
                 if high_scores[idx][0] in ["???", "", None, "   "]:  # no player, allow claim
                     high_scores[idx][0] = ""
 
+                if is_phantom_slot(high_scores[idx][0], high_scores[idx][1], _seed_threshold):
+                    high_scores[idx][1] = 0  # untouched seeded threshold slot, not a real score
+
             # initials for grand champion
             if "GrandChampInitAdr" in S.gdata["HighScores"]:
                 initial_start = S.gdata["HighScores"]["GrandChampInitAdr"]
@@ -289,31 +294,49 @@ def place_machine_scores():
 
 
 def _remove_machine_scores(GrandChamp="Max"):
-    """remove machine scores to prep for forced intial entry  - WPC"""
+    """Prep the machine high-score table for forced initials entry - WPC.
+
+    Seed the four slots so the lowest equals the top-N threshold and the three
+    above it are threshold+1/+2/+3 (sentinel initials) — a validly descending
+    table that only prompts players who BEAT the threshold. Fall back to zeroing
+    when the board is not yet full. The GrandChamp="Zero" path (leaderboard
+    reset) always zeroes.
+    """
+    global _seed_threshold
+
+    if GrandChamp == "Zero":
+        _seed_threshold = 0
+    else:
+        cutoff = clamp_cutoff(DataStore.read_record("extras", 0)["top_n_cutoff"])
+        leaders = [DataStore.read_record("leaders", i) for i in range(DataStore.memory_map["leaders"]["count"])]
+        _seed_threshold = compute_threshold(leaders, cutoff)
+
     if S.gdata["HighScores"]["Type"] == 10:
-        log.log("SCORE: Remove machine scores type 10")
+        log.log("SCORE: Seed machine scores type 10, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * S.gdata["HighScores"]["ScoreSpacing"]
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * S.gdata["HighScores"]["InitialSpacing"]
 
-            for i in range(S.gdata["HighScores"]["BytesInScore"]):
-                shadowRam[score_start + i] = 0  # score
+            if _seed_threshold > 0:
+                # index 0 (1st place) = threshold+3 ... index 3 (lowest) = threshold
+                shadowRam[score_start : score_start + S.gdata["HighScores"]["BytesInScore"]] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x20  # space sentinel -> reads blank
+            else:
+                for i in range(S.gdata["HighScores"]["BytesInScore"]):
+                    shadowRam[score_start + i] = 0  # score
+                shadowRam[score_start + S.gdata["HighScores"]["BytesInScore"] - 2] = 0x10 * (6 - index)
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x41  # initials all 'A'
 
-            shadowRam[score_start + S.gdata["HighScores"]["BytesInScore"] - 2] = 0x10 * (6 - index)
-
-            for i in range(3):
-                shadowRam[initial_start + i] = 0x41  # initials all 'A'
-
-        # set grand champion score to max, so all players will be int he normal 1-4 places
+        # set grand champion score to max, so all players land in the normal 1-4 places
         # Or near zero for reset leaderboard function
         if "GrandChampScoreAdr" in S.gdata["HighScores"]:
             score_start = S.gdata["HighScores"]["GrandChampScoreAdr"]
             if GrandChamp == "Max":
-                # set grand champion score to max
                 for i in range(S.gdata["HighScores"]["BytesInScore"]):
                     shadowRam[score_start + i] = 0x99
             elif GrandChamp == "Zero":
-                # set grand champ to min
                 for i in range(S.gdata["HighScores"]["BytesInScore"]):
                     shadowRam[score_start + i] = 0x00
                 shadowRam[score_start + S.gdata["HighScores"]["BytesInScore"] - 2] = 0x90
