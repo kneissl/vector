@@ -255,6 +255,7 @@ def blankStruct(structure_name):
         "Gpassword": "",
         "gamename": "GenericSystem11_",
         "other": 1,
+        "top_n_cutoff": 10,
         "switches": [0] * 72,
     }
     structure = memory_map[structure_name]

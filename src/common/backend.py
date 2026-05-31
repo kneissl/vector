@@ -1193,7 +1193,8 @@ def app_setScoreCap(request):
     if "web-ui" in json_data:
         record["claim_scores"] = bool(json_data["web-ui"])
     if "top-n-cutoff" in json_data:
-        record["top_n_cutoff"] = int(json_data["top-n-cutoff"])
+        # stored raw; the serialize path clamps via clamp_cutoff (tolerates bad input)
+        record["top_n_cutoff"] = json_data["top-n-cutoff"]
     ds_write_record("extras", record, 0)
 
 
