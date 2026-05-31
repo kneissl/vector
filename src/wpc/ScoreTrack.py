@@ -435,11 +435,16 @@ def update_leaderboard(new_entry):
                 break
 
     # Keep one best score per initials (all blank initials collapse to one slot).
-    top_scores = dedupe_leaderboard(top_scores + [new_entry], count)
+    deduped = dedupe_leaderboard(top_scores + [new_entry], count)
 
-    blank = {"initials": "", "full_name": "", "date": "", "score": 0}
+    # Pad back to a full count-length board so the module global stays table-sized
+    # (place_machine_scores() indexes top_scores positionally without bounds checks).
+    top_scores = [
+        deduped[i] if i < len(deduped) else {"initials": "", "full_name": "", "date": "", "score": 0}
+        for i in range(count)
+    ]
     for i in range(count):
-        DataStore.write_record("leaders", top_scores[i] if i < len(top_scores) else blank, i)
+        DataStore.write_record("leaders", top_scores[i], i)
 
     return True
 
