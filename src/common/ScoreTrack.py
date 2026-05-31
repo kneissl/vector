@@ -13,7 +13,7 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
-from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, is_phantom_slot
+from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot
 
 log = logger_instance
 
@@ -365,28 +365,25 @@ def update_leaderboard(new_entry):
             new_entry["full_name"] = ""
 
     # Load scores
-    top_scores = [DataStore.read_record("leaders", i) for i in range(DataStore.memory_map["leaders"]["count"])]
-
-    # if matches a record without initials in top_scores (score claim) - just add initials
-    for entry in top_scores:
-        if entry["initials"] == "" and entry["score"] == new_entry["score"]:
-            entry["initials"] = new_entry["initials"]
-            entry["full_name"] = new_entry["full_name"]
-            DataStore.write_record("leaders", entry, top_scores.index(entry))
-            return True
-
-    # Check if the score already exists in the top_scores list
-    if any(entry["initials"] == new_entry["initials"] and entry["score"] == new_entry["score"] for entry in top_scores):
-        return False  # Entry already exists, do not add it
-
-    # Check if the new score is higher than the lowest in the list or if the list is not full
-    top_scores.append(new_entry)
-    top_scores.sort(key=lambda x: x["score"], reverse=True)
-
     count = DataStore.memory_map["leaders"]["count"]
-    top_scores = top_scores[:count]
+    top_scores = [DataStore.read_record("leaders", i) for i in range(count)]
+
+    # Score claim: a web claim supplies real initials for an existing unclaimed
+    # (blank) row. Convert that row in place so it isn't left as a ghost, then let
+    # the dedup below merge it with any existing row for those initials.
+    if new_entry["initials"]:
+        for entry in top_scores:
+            if entry is not None and entry["initials"] == "" and entry["score"] == new_entry["score"]:
+                entry["initials"] = new_entry["initials"]
+                entry["full_name"] = new_entry["full_name"]
+                break
+
+    # Keep one best score per initials (all blank initials collapse to one slot).
+    top_scores = dedupe_leaderboard(top_scores + [new_entry], count)
+
+    blank = {"initials": "", "full_name": "", "date": "", "score": 0}
     for i in range(count):
-        DataStore.write_record("leaders", top_scores[i], i)
+        DataStore.write_record("leaders", top_scores[i] if i < len(top_scores) else blank, i)
 
     return True
 
