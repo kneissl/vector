@@ -11,6 +11,7 @@ from micropython import const
 
 import SPI_Store as fram
 from logger import logger_instance
+from score_threshold import clamp_cutoff
 
 Log = logger_instance
 
@@ -129,7 +130,8 @@ def serialize(record, structure_name):
                 enable |= 0x20
         else:
             enable = record["enable"]
-        return struct.pack("<II20s20s", enable, record["other"], record["lastIP"].encode(), record["message"].encode())
+        other_val = clamp_cutoff(record.get("top_n_cutoff", record.get("other", 10)))
+        return struct.pack("<II20s20s", enable, other_val, record["lastIP"].encode(), record["message"].encode())
     elif structure_name == "switches":
         # Pack 72 bytes
         switch_bytes = record.get("switches", [0] * 72)
@@ -204,7 +206,7 @@ def deserialize(data, structure_name):
         try:
             enable, other, lastIP, message = struct.unpack("<II20s20s", data)
             return {
-                "other": other,
+                "top_n_cutoff": clamp_cutoff(other),
                 "lastIP": lastIP.decode().strip("\0"),
                 "message": message.decode().strip("\0"),
                 "enter_initials_on_game": bool(enable & 0x01),
@@ -218,7 +220,7 @@ def deserialize(data, structure_name):
             Log.log("DATSTORE: fault extras")
             return {
                 "enable": 5,
-                "other": 1,
+                "other": 10,
                 "lastIP": "none",
                 "message": "none",
                 "enter_initials_on_game": True,
@@ -227,6 +229,7 @@ def deserialize(data, structure_name):
                 "tournament_mode": False,
                 "WPCTimeOn": False,
                 "MM_Always": False,
+                "top_n_cutoff": 10,
             }
     elif structure_name == "switches":
         try:
