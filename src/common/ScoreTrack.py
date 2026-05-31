@@ -13,11 +13,13 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
+from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, is_phantom_slot
 
 log = logger_instance
 
 rtc = RTC()
 top_scores = []
+_seed_threshold = 0  # Nth-place score seeded into the machine table at game start
 nGameIdleCounter = 0
 push_game_count = 0
 last_pushed_game = [["" , 0], ["", 0], ["", 0], ["", 0]]
@@ -124,6 +126,9 @@ def _read_machine_score(HighScores):
                 if high_scores[idx][0] in ["???", "", None, "   "]:  # no player, allow claim
                     high_scores[idx][0] = ""
 
+                if is_phantom_slot(high_scores[idx][0], high_scores[idx][1], _seed_threshold):
+                    high_scores[idx][1] = 0  # untouched seeded threshold slot, not a real score
+
         # if we have high scores, intials AND in-play socres, put initials to the in play scores
         for in_play_score in in_play_scores:
             for high_score in high_scores:
@@ -222,29 +227,60 @@ def place_machine_scores():
 
 
 def _remove_machine_scores():
-    """remove machine scores"""
-    if S.gdata["HighScores"]["Type"] == 1 and DataStore.read_record("extras", 0)["enter_initials_on_game"]:  # system 11 type 1
-        log.log("SCORE: Remove machine scores type 1")
+    """Prep the machine high-score table for forced initials entry.
+
+    When a top-N threshold applies, seed the four slots so the lowest slot equals
+    the Nth-place leaderboard score and the three slots above it are
+    threshold+1/+2/+3 (sentinel initials) — keeping the table validly descending
+    while gating prompts on beating the threshold. When the board is not yet full
+    (threshold 0) or on-machine entry is off, fall back to zeroing the slots so
+    every score qualifies (original behavior).
+    """
+    global _seed_threshold
+
+    if not DataStore.read_record("extras", 0)["enter_initials_on_game"]:
+        _seed_threshold = 0
+        if S.gdata["HighScores"]["Type"] == 9:
+            log.log("SCORE: Remove machine scores system 9")
+            place_machine_scores()
+        return
+
+    cutoff = clamp_cutoff(DataStore.read_record("extras", 0)["top_n_cutoff"])
+    leaders = [DataStore.read_record("leaders", i) for i in range(DataStore.memory_map["leaders"]["count"])]
+    _seed_threshold = compute_threshold(leaders, cutoff)
+
+    if S.gdata["HighScores"]["Type"] == 1:  # system 11 type 1
+        log.log("SCORE: Seed machine scores type 1, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-            for i in range(4):
-                shadowRam[score_start + i] = 0  # score
-            for i in range(3):
-                shadowRam[initial_start + i] = 0x3F  # intials
-            shadowRam[score_start + 2] = 5 - index
+            if _seed_threshold > 0:
+                # index 0 (1st place) = threshold+3 ... index 3 (lowest) = threshold
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
+            else:
+                for i in range(4):
+                    shadowRam[score_start + i] = 0  # score
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x3F  # intials
+                shadowRam[score_start + 2] = 5 - index
 
-    elif S.gdata["HighScores"]["Type"] == 3 and DataStore.read_record("extras", 0)["enter_initials_on_game"]:  # system 11, type 3
-        log.log("SCORE: Remove machine scores type 3")
+    elif S.gdata["HighScores"]["Type"] == 3:  # system 11, type 3
+        log.log("SCORE: Seed machine scores type 3, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-
-            for i in range(4):
-                shadowRam[score_start + i] = 0
-            shadowRam[score_start + 2] = 5 - index
-            for i in range(3):
-                shadowRam[initial_start + i] = 0x00
+            if _seed_threshold > 0:
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x00  # sentinel initials -> reads blank
+            else:
+                for i in range(4):
+                    shadowRam[score_start + i] = 0
+                shadowRam[score_start + 2] = 5 - index
+                for i in range(3):
+                    shadowRam[initial_start + i] = 0x00
 
     elif S.gdata["HighScores"]["Type"] == 9:
         log.log("SCORE: Remove machine scores system 9")
