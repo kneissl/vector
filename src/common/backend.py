@@ -118,6 +118,7 @@ def get_content_type(file_path):
         ".jpeg": "image/jpeg",
         ".gif": "image/gif",
         ".svg": "image/svg+xml",
+        ".webp": "image/webp",
         ".gz": "application/gzip",
     }
     for extension, content_type in content_type_mapping.items():

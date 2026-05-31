@@ -102,15 +102,27 @@
         width: 0;
         margin: 0;
       }
+
+      /* ToadRats header logo: black artwork -> invert so it shows in dark mode */
+      #brand-logo {
+        display: block;
+        width: auto;
+      }
+      [data-theme="dark"] #brand-logo {
+        filter: invert(1);
+      }
     </style>
   </head>
   <body class="container-fluid">
     <header class="container">
       <div class="grid">
         <div style="align-self: center; justify-self: start">
-          <strong id="brand" style="font-size: 1.25rem; letter-spacing: 0.02em"
-            >ToadRats</strong
-          >
+          <img
+            id="brand-logo"
+            src="/img/logo_mobile.webp"
+            alt="ToadRats Pinball"
+            height="44"
+          />
         </div>
         <div style="align-self: center; justify-self: center">
           <strong id="game_name"></strong>
