@@ -1145,7 +1145,8 @@ def app_getScoreCap(request):
         example:
             {
                 "on-machine": true,
-                "web-ui": false
+                "web-ui": false,
+                "top-n-cutoff": 10
             }
     @end
     """
@@ -1153,6 +1154,7 @@ def app_getScoreCap(request):
     return {
         "on-machine": record["enter_initials_on_game"],
         "web-ui": record["claim_scores"],
+        "top-n-cutoff": record["top_n_cutoff"],
     }
 
 
@@ -1172,6 +1174,10 @@ def app_setScoreCap(request):
           type: bool
           required: false
           description: Allow initials entry via the web interface
+        - name: top-n-cutoff
+          type: int
+          required: false
+          description: Only force on-machine initials entry for scores in the top N (1-20, default 10)
     response:
       status_codes:
         - code: 200
@@ -1186,6 +1192,8 @@ def app_setScoreCap(request):
         record["enter_initials_on_game"] = bool(json_data["on-machine"])
     if "web-ui" in json_data:
         record["claim_scores"] = bool(json_data["web-ui"])
+    if "top-n-cutoff" in json_data:
+        record["top_n_cutoff"] = int(json_data["top-n-cutoff"])
     ds_write_record("extras", record, 0)
 
 
