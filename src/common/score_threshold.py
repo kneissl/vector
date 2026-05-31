@@ -33,7 +33,10 @@ def compute_threshold(leaders, n):
     """
     if n < 1 or n > len(leaders):
         return 0
-    score = leaders[n - 1].get("score", 0)
+    entry = leaders[n - 1]
+    if not entry:  # corrupt/blank record can deserialize to None
+        return 0
+    score = entry.get("score", 0)
     return score if score > 0 else 0
 
 

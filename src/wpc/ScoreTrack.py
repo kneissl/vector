@@ -628,10 +628,13 @@ def CheckForNewScores(nState=[0]):
                 #waiting for players to input initials
                 high_scores = DataMapper.get_initials_entered()
                 high_score_count = sum(1 for score in high_scores if score[1] > 1000)
-                print("SCORE: waiting for initials, count = ", high_score_count, " players = ", DataMapper.get_players_in_game())
+                # Only the players who beat the seeded top-N threshold are prompted,
+                # so wait for that many entries (all players when the board isn't full).
+                expected = DataMapper.expected_high_score_count(live_scores)
+                print("SCORE: waiting for initials, count = ", high_score_count, " expected = ", expected)
 
-                if high_score_count >= DataMapper.get_players_in_game():
-                    print("SCORE: done - got all players initials")
+                if high_score_count >= expected:
+                    print("SCORE: done - got all qualifying initials")
                     #all scores in - wrap up
                     nState[0] = 4
 

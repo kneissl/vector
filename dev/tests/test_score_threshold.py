@@ -56,6 +56,11 @@ def test_compute_threshold_all_zero():
     assert st.compute_threshold(board(0, 0, 0), 1) == 0
 
 
+def test_compute_threshold_none_entry_returns_zero():
+    # a corrupt leaders slot can deserialize to None; must not raise
+    assert st.compute_threshold([{"score": 100}, {"score": 90}, None], 3) == 0
+
+
 # --- is_phantom_slot ---
 def test_is_phantom_untouched_seed_across_band():
     # lowest slot (threshold) plus the three filler slots above it
