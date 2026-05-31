@@ -51,17 +51,24 @@ already rejects blank/sentinel initials (`"@@@"`, `"   "`, `"???"`).
 When `enter_initials_on_game` is ON, at game start seed the machine's high-score slot(s) with
 the **Nth-place leaderboard score** as the threshold rather than zeroing:
 
-- Compute the threshold from the `leaders` store: the score at rank N (`read_record("leaders", N-1)`).
-- Write that threshold into the machine high-score slot(s) so the machine's native logic only
-  prompts players who **beat** it (= only top-N-worthy scores).
-- Seeded-slot initials keep the existing blank/sentinel marker (`0x3F` common, `'A'` WPC), so
-  slots a player did not beat remain recognizable as "no player."
-- **Fallback (board not full):** if there are fewer than N real entries in `leaders`, or the
-  Nth score is `0`, **zero the slots exactly as today** — the board isn't full, so every score
-  qualifies. Same fallback when the cutoff is "off" (see §3).
-- **WPC specifics:** keep grand-champion-to-max behavior and the trailing
-  `fix_high_score_checksum()` call. Only the four ranked slots' score values change (zero →
+- Read the effective cutoff N from settings (`clamp_cutoff(extras.top_n_cutoff)`, §3).
+- Compute the threshold from the `leaders` store via `compute_threshold(leaders, N)`.
+- If the threshold is `> 0`, write that threshold value into **all four** machine high-score
+  slots (the lowest slot is what the machine compares against; filling all four keeps the table
+  validly descending with the lowest == threshold), so the machine's native logic only prompts
+  players who **beat** it (= only top-N-worthy scores). Seeded-slot initials keep the existing
+  blank/sentinel marker (`0x3F` common, `'A'` WPC). Store the threshold in the module global
+  `_seed_threshold` for readback (§2).
+- **Fallback (board not full):** `compute_threshold` returns `0` when there are fewer than N
+  real entries in `leaders`. In that case **zero the slots exactly as today** (every score
+  qualifies) and set `_seed_threshold = 0`.
+- **WPC specifics:** keep grand-champion-to-max behavior and re-run `fix_high_score_checksum()`
+  after writing the threshold BCD. Only the four ranked slots' score values change (zero →
   threshold).
+- **Hardware risk (manual-verify):** some machines may require strictly descending high-score
+  slots. Filling all four with the identical threshold assumes equal values are accepted. If a
+  target machine rejects equal slots, fall back to seeding only the lowest slot at the threshold
+  and the upper three at real leaderboard scores above it. Validated on-device (see Testing).
 
 Decision logic is extracted into a pure helper for testing:
 
@@ -79,19 +86,32 @@ threshold) but still carries the sentinel/blank initials. Today's readback only 
 scoring `< 1000`, so these phantom slots could otherwise leak into the leaderboard and the
 claimable-scores list (letting someone claim a score they never earned).
 
-Fix: in `_read_machine_score`, treat **any slot whose initials are still the blank/sentinel
-marker as no-player (score → 0)**, regardless of score value. This generalizes the existing
-`< 1000` rule. Unentered seeded slots then collapse to 0 exactly like today's zeroed slots:
+**Important constraint — do not break the existing "allow claim" feature.** `_read_machine_score`
+deliberately keeps high-score slots that have a real score but blank initials (the
+`if high_scores[idx][0] in ["???", "", None, "   "]: high_scores[idx][0] = ""` branch, commented
+"no player, allow claim"). This is how a genuine top score whose player walked away without
+typing initials becomes claimable later via the web UI. We must preserve it. A player who *beats*
+the threshold and then skips initials entry leaves a slot with `score > threshold` and blank
+initials — that must stay claimable.
 
-- `update_leaderboard()` ignores them (existing blank-initials rejection).
-- `_place_game_in_claim_list()` does not offer phantom claims.
+So the phantom test is **both** conditions, not just blank initials: a slot is a leftover seed
+(and gets zeroed) only when its initials are blank **and** its score equals the seeded threshold.
+Unentered seeds always read back at exactly the threshold value; a real qualifying score is always
+strictly greater than the threshold (the machine only inserts scores that *beat* the lowest slot),
+so the two never collide.
 
-Real qualifying players overwrote the sentinel with typed initials and pass through untouched.
+Fix: track the seeded threshold in a module-level global `_seed_threshold` (set when
+`_remove_machine_scores` seeds, `0` when it falls back to zeroing). In `_read_machine_score`, after
+the existing blank-initials normalization, zero the score of any slot where
+`is_phantom_slot(initials, score, _seed_threshold)` is true. When `_seed_threshold` is `0`
+(fallback/zeroed table) the test is always false, so behavior is identical to today.
 
-Decision logic extracted as:
+Decision logic extracted as a pure helper:
 
 ```
-is_phantom_slot(initials) -> bool   # True if initials is the platform blank/sentinel marker
+is_phantom_slot(initials, score, threshold) -> bool
+    # True iff threshold > 0 and score == threshold and initials is blank ("" / "???" / "   ")
+    # i.e. an untouched seeded slot. False for real (score > threshold) claimable blanks.
 ```
 
 ### 3. Configurable cutoff N — storage, API, UI
@@ -102,15 +122,23 @@ round-tripped in `SPI_DataStore.py` but referenced nowhere else). Surface it as
 `src/wpc/SPI_DataStore.py`):
 
 - Read: `top_n_cutoff = other`.
-- Write: pack `top_n_cutoff` back into `other`.
-- Default: **10**.
-- Semantics: `0` (including legacy units where `other` has always been 0) = **off** → force
-  every game (today's behavior). `1…20` = top-N threshold.
-- Validation/clamp on write via:
+- Write: pack `clamp_cutoff(top_n_cutoff)` back into `other`.
+- Default / effective value: **10**. The cutoff is always an active top-N threshold in
+  `1…leaders_count (20)`; there is no separate "force every game" mode (the On-Machine toggle
+  already governs whether on-machine claiming happens at all).
+- **Backward compatibility:** existing units have `other == 0` (blanked storage). A stored `0`
+  (or any out-of-range value) is interpreted as the default **10**. This means existing
+  On-Machine units switch from "prompt every game" to "prompt for top 10" on upgrade — which is
+  exactly the requested behavior, applied globally. Document this in release notes.
+- Validation/normalization helper:
 
 ```
-clamp_cutoff(value) -> int   # 0 stays 0 (off); otherwise clamp to 1..leaders_count (20)
+clamp_cutoff(value, leaders_count=20) -> int
+    # returns value if 1 <= value <= leaders_count, else 10 (covers 0, negatives, > count)
 ```
+
+Both the read path (deriving the effective cutoff) and the write path use `clamp_cutoff`, so a
+legacy `0` consistently resolves to `10` everywhere.
 
 **API.** Extend the existing settings endpoints in `src/common/backend.py`:
 
@@ -134,39 +162,53 @@ exists than hiding it).
 | `src/common/backend.py` | `top-n-cutoff` in get/set claim-methods endpoints |
 | `src/common/web/html/admin.html` | Number input in Score Claim Methods |
 | `src/common/web/js/admin.js` | Plumb input through settings load/save |
-| `dev/tests/` | Unit tests for the pure helpers |
+| `src/common/score_threshold.py` | New pure module: `compute_threshold`, `is_phantom_slot`, `clamp_cutoff` |
+| `dev/tests/test_score_threshold.py` | Unit tests for the pure helpers |
 
-A pure-helper module shared by both platforms (or duplicated per platform, matching the repo's
-existing per-platform duplication) will be decided during planning; the helpers must be
-importable on CPython without hardware modules.
+**Helper module placement (decided):** `dev/build.py` copies `src/common/*` into the build dir
+first, then overlays the platform directory (`src/wpc`, etc.) on top, flattening everything into
+one directory. So a new pure module `src/common/score_threshold.py` is bundled into *every*
+platform build and can be `import`ed by both `src/common/ScoreTrack.py` and
+`src/wpc/ScoreTrack.py` (which is overlaid on top but lands in the same flat build dir). The
+module imports only Python stdlib — no `machine`/`Shadow_Ram_Definitions` — so it is importable
+on CPython for unit tests.
 
 ## Testing
 
 ScoreTrack imports MicroPython/hardware modules and has no existing unit-test harness; existing
 tests are CPython build/config validators. Strategy:
 
-**Unit tests (CPython, `dev/tests/`):**
+**Unit tests (CPython, `dev/tests/test_score_threshold.py`):**
 - `compute_threshold(leaders, n)`: full board, partial board (fewer than N real entries),
-  N=1, N greater than count, ties at the cutoff, all-zero board.
-- `is_phantom_slot(initials)`: each platform's blank/sentinel marker, real initials, empty.
-- `clamp_cutoff(value)`: 0 stays 0; negative; 1; 20; above 20.
+  N=1, N greater than count, all-zero board, board with trailing zero scores.
+- `is_phantom_slot(initials, score, threshold)`: untouched seed (blank + score==threshold),
+  real claimable blank (blank + score>threshold → not phantom), real player (initials + any
+  score → not phantom), threshold==0 (never phantom).
+- `clamp_cutoff(value)`: 0 → 10; negative → 10; 1 → 1; 20 → 20; 21 → 10; default arg.
 
-**Manual on-device verification (in spec checklist — cannot be unit-tested without hardware):**
-1. With On-Machine on and cutoff 10 on a board with 20 entries: a score below the 10th-place
-   value does **not** prompt for initials; a score above it **does**, and the entry appears in
-   the leaderboard.
-2. Board with fewer than 10 entries: every score still prompts (fallback).
-3. Cutoff set to 0 / off: behaves like today (every game prompts).
-4. After a game, the claimable-scores list contains only real entered scores — no phantom
-   threshold-valued entries.
-5. WPC: grand champion and high-score checksum remain valid after seeding.
+**Manual on-device verification (cannot be unit-tested without hardware):**
+1. On-Machine on, cutoff 10, board with 20 entries: a score below the 10th-place value does
+   **not** prompt for initials; a score above it **does**, and the entry appears in the leaderboard.
+2. Board with fewer than 10 entries: every score still prompts (fallback path).
+3. Player beats threshold but skips initials entry: score is still claimable via web UI (the
+   "allow claim" feature is preserved — §2).
+4. After a game, the claimable-scores list contains only real entered/qualifying scores — no
+   phantom threshold-valued entries.
+5. WPC: grand champion and high-score checksum remain valid after seeding (machine boots and
+   shows correct high scores in attract mode).
+6. Equal-slot acceptance: confirm the machine accepts four equal threshold slots and still
+   prompts correctly (see Hardware risk in §1).
 
 ## Edge cases
 
-- **Board not full / Nth score is 0:** fall back to zeroing (force every game).
-- **Cutoff off (0) or legacy storage:** force every game.
-- **Cutoff > leaders count:** clamped to 20 on write.
-- **Player scores exactly the threshold:** "beats the table" is per the machine's own
-  comparison; this matches the machine's native qualification semantics and is acceptable.
-- **Fewer qualifying players than slots:** leftover seeded slots carry sentinel initials and
-  are dropped by the readback filter (§2).
+- **Board not full / fewer than N real entries:** `compute_threshold` returns 0 → fall back to
+  zeroing (every score qualifies).
+- **Legacy storage (`other == 0`) or out-of-range cutoff:** `clamp_cutoff` resolves to the
+  default 10. Existing On-Machine units move to top-10 behavior on upgrade.
+- **Cutoff > leaders count or < 1:** normalized to 10 by `clamp_cutoff`.
+- **Player beats then skips initials:** slot has `score > threshold` + blank initials → NOT a
+  phantom; stays claimable.
+- **Player scores exactly the threshold:** does not beat the lowest slot, so the machine does
+  not prompt — matches native qualification semantics.
+- **Fewer qualifying players than slots:** leftover seeded slots read back at exactly the
+  threshold with blank initials → zeroed by the readback filter (§2).
