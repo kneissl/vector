@@ -52,7 +52,7 @@ async function getScoreClaimMethods() {
     const payload = {
       "on-machine": onMachineToggle.checked ? 1 : 0,
       "web-ui": webUIToggle.checked ? 1 : 0,
-      "top-n-cutoff": parseInt(cutoffInput.value, 10),
+      "top-n-cutoff": parseInt(cutoffInput.value, 10) || 10,
     };
     await window.smartFetch("/api/settings/set_claim_methods", payload, true);
   }
