@@ -65,6 +65,7 @@ def test_is_phantom_untouched_seed_across_band():
     assert st.is_phantom_slot("", 5003, 5000) is True
     assert st.is_phantom_slot("   ", 5000, 5000) is True
     assert st.is_phantom_slot("???", 5003, 5000) is True
+    assert st.is_phantom_slot(None, 5000, 5000) is True
 
 
 def test_is_phantom_just_above_band_not_phantom():
