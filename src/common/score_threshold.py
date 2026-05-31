@@ -53,3 +53,23 @@ def is_phantom_slot(initials, score, threshold):
     if initials is None:
         return True
     return initials.strip() == "" or initials == "???"
+
+
+def dedupe_leaderboard(entries, count):
+    """Reduce leaderboard entries to one best score per initials.
+
+    The dedup key is the entry's initials, stripped and upper-cased; all blank
+    initials (empty/whitespace/missing) collapse into a single "" bucket. For
+    each key the highest-scoring entry is kept. Returns up to `count` entries
+    sorted by score descending. None entries are skipped (the leaders record
+    deserializer can return None).
+    """
+    best = {}
+    for entry in entries:
+        if entry is None:
+            continue
+        key = (entry.get("initials") or "").strip().upper()
+        if key not in best or entry.get("score", 0) > best[key].get("score", 0):
+            best[key] = entry
+    ordered = sorted(best.values(), key=lambda e: e.get("score", 0), reverse=True)
+    return ordered[:count]

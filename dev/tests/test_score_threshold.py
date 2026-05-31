@@ -83,3 +83,59 @@ def test_is_phantom_real_player_not_phantom():
 
 def test_is_phantom_threshold_zero_never_phantom():
     assert st.is_phantom_slot("", 0, 0) is False
+
+
+# --- dedupe_leaderboard ---
+def L(initials, score):
+    return {"initials": initials, "score": score}
+
+
+def keyed(entries):
+    return [(e["initials"], e["score"]) for e in entries]
+
+
+def test_dedupe_keeps_highest_per_initials():
+    out = st.dedupe_leaderboard([L("ABC", 100), L("ABC", 300), L("ABC", 200)], 20)
+    assert keyed(out) == [("ABC", 300)]
+
+
+def test_dedupe_key_is_case_and_whitespace_insensitive():
+    # "abc" and "ABC" map to the same key; the higher score is kept
+    out = st.dedupe_leaderboard([L("abc", 100), L("ABC", 300)], 20)
+    assert keyed(out) == [("ABC", 300)]
+
+
+def test_dedupe_blanks_collapse_to_one_highest():
+    out = st.dedupe_leaderboard([L("", 5000), L("", 3000), L("   ", 4000)], 20)
+    assert keyed(out) == [("", 5000)]
+
+
+def test_dedupe_distinct_players_equal_scores_both_kept():
+    out = st.dedupe_leaderboard([L("ABC", 500), L("XYZ", 500)], 20)
+    assert set(keyed(out)) == {("ABC", 500), ("XYZ", 500)}
+    assert len(out) == 2
+
+
+def test_dedupe_skips_none_entries():
+    out = st.dedupe_leaderboard([None, L("ABC", 100), None], 20)
+    assert keyed(out) == [("ABC", 100)]
+
+
+def test_dedupe_sorted_descending():
+    out = st.dedupe_leaderboard([L("A", 10), L("B", 30), L("C", 20)], 20)
+    assert keyed(out) == [("B", 30), ("C", 20), ("A", 10)]
+
+
+def test_dedupe_truncates_to_count():
+    out = st.dedupe_leaderboard([L("A", 10), L("B", 20), L("C", 30)], 2)
+    assert keyed(out) == [("C", 30), ("B", 20)]
+
+
+def test_dedupe_empty_input():
+    assert st.dedupe_leaderboard([], 20) == []
+
+
+def test_dedupe_missing_initials_key_treated_as_blank():
+    out = st.dedupe_leaderboard([{"score": 700}, L("", 200)], 20)
+    # both have blank key -> collapse; highest (700) kept
+    assert [e["score"] for e in out] == [700]
