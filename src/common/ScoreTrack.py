@@ -19,7 +19,10 @@ log = logger_instance
 
 rtc = RTC()
 top_scores = []
-_seed_threshold = 0  # Nth-place score seeded into the machine table at game start
+# Top-N threshold seeded into the machine high-score table at game start.
+# Invariant: set by _remove_machine_scores (game start) before _read_machine_score
+# (game end) reads it back, same process, sequentially. Default 0 = filter inert.
+_seed_threshold = 0
 nGameIdleCounter = 0
 push_game_count = 0
 last_pushed_game = [["" , 0], ["", 0], ["", 0], ["", 0]]
