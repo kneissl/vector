@@ -236,8 +236,10 @@
           name="on-machine"
           disabled
         />
-        <b>On-Machine:</b> triggers high score every game to collect players
-        initials (Only for machines where players can enter initials)
+        <b>On-Machine:</b> ask players for their initials on the machine only
+        when a score makes the top N of the leaderboard (set the cutoff below).
+        Until the leaderboard has N scores, every game still asks. Only for
+        machines where players can enter initials.
       </label>
       <label>
         <input
