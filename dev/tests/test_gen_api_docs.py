@@ -11,5 +11,5 @@ def test_write_docs_only_generates_routes(tmp_path, monkeypatch) -> None:
 
     assert docs_dir.exists()
     written_files = {p.name for p in docs_dir.iterdir()}
-    assert written_files == {"routes.html"}
-    assert (docs_dir / "routes.html").read_text()
+    assert written_files == {"routes.md"}
+    assert (docs_dir / "routes.md").read_text()

@@ -224,3 +224,57 @@ tests are CPython build/config validators. Strategy:
   not prompt — matches native qualification semantics.
 - **Fewer qualifying players than slots:** leftover seeded slots read back in the band
   `[threshold, threshold+3]` with blank initials → zeroed by the readback filter (§2).
+
+---
+
+## Correction (2026-05-30): unique-by-initials leaderboard
+
+After the trigger work, the requirement was refined: the top-N must count **unique** high
+scores — at most **one score per 3-letter initials**, with all **blank** initials collapsing
+into a **single** slot. This makes "top 10" mean ten distinct entries rather than ten rows that
+one player could dominate. Scope: **System 11 (`src/common`) + WPC (`src/wpc`)**, matching the
+trigger. `em`/`data_east` leaderboards are unchanged.
+
+### 4. Dedup the stored leaderboard
+
+New pure helper in `src/common/score_threshold.py`:
+
+```
+dedupe_leaderboard(entries, count) -> list
+    # key = (entry["initials"] or "").strip().upper(); all blanks share the "" bucket.
+    # Keep the highest-scoring entry per key. Return up to `count` entries, score-descending.
+    # Skips None entries (leaders deserialize can return None).
+```
+
+`update_leaderboard` (common + wpc) changes:
+- Keep the existing **claim-conversion** step: when a web claim arrives with real initials whose
+  score matches an existing blank row, convert that blank row to the claimed initials (so it does
+  not linger as a ghost), then fall through to the dedup.
+- Replace the append/sort/truncate tail with:
+  `top_scores = dedupe_leaderboard(top_scores + [new_entry], count)`, then write all `count`
+  slots, padding any short remainder with blank rows
+  `{"initials": "", "full_name": "", "date": "", "score": 0}` (the `leaders` record schema is
+  `<3s16s10sI`).
+- WPC: call `update_individual_score(new_entry)` exactly once (the old code called it in two
+  branches); the per-player "individual" history board is otherwise unchanged.
+- Guard the claim loop against `None` rows.
+
+### Consequences
+
+- **`compute_threshold` needs no change.** Operating on the now-deduped stored board, rank N is
+  automatically the Nth unique score, and the single blank slot counts as one entry.
+- The single blank slot holds the **highest** unclaimed score; lower unclaimed scores are dropped
+  (accepted tradeoff — only the top unclaimed score stays claimable).
+- Two different players with the **same** score now both remain (today's WPC code dropped the
+  second via score-only matching) — a side improvement.
+- Per-player "individual" score history is untouched (it intentionally keeps multiple scores per
+  player).
+- Another patch version bump for `src/common/SharedState.py` and `src/wpc/systemConfig.py`.
+
+### Testing
+
+Unit tests for `dedupe_leaderboard` (CPython, `dev/tests/test_score_threshold.py`): duplicate real
+initials keep the highest; case/whitespace-insensitive key; multiple blanks collapse to one
+(highest); distinct players with equal scores both kept; `None` entries skipped; truncation to
+`count`; empty input. On-device manual checks: leaderboard shows one row per initials; one blank
+row; claiming still attaches initials; the trigger threshold reflects the Nth unique score.
