@@ -6,6 +6,8 @@
 
 # Vector
 
+> **This is a fork of [warped-pinball/vector](https://github.com/warped-pinball/vector).** It tracks upstream closely; the main addition is the **Top-N high-score trigger**. See [About this fork](#about-this-fork).
+
 Vector is a modern hardware and software solution that brings advanced features to classic pinball machines while preserving their original gameplay. It allows your Williams/Bally System 9 and 11 games, all variations of WPC and Data East games to take advantage of modern electronics and connectivity.
 
 Read the docs: [docs.warpedpinball.com](https://docs.warpedpinball.com)
@@ -13,6 +15,27 @@ Read the docs: [docs.warpedpinball.com](https://docs.warpedpinball.com)
 Check us out: [Warped Pinball](https://warpedpinball.com)
 
 Get your Vector: [shop.warpedpinball.com](https://shop.warpedpinball.com)
+
+## About this fork
+
+This fork runs on the same hardware and stays close to upstream `warped-pinball/vector`. The **primary difference is the Top-N high-score trigger**; there are also WiFi-resilience and branding changes.
+
+### Top-N high-score trigger (primary change)
+
+Upstream's **On-Machine** initials claiming makes the physical machine prompt for player initials on *every* game — at game start it zeroes the machine's native high-score table so any score "beats" it. This fork instead seeds that table with the **Nth-place leaderboard score as a threshold**, so the machine only runs its native initials-entry sequence when a score would actually land in the **top N** of Vector's stored leaderboard.
+
+- **Configurable N** — set *"Only collect initials for top __ scores"* in the admin page's Score Claim Methods section (default **10**, range 1–20).
+- **Unique by initials** — the leaderboard is deduped so "top N" means N *distinct* entries: at most one score per 3-letter initials, with all blank/unclaimed initials collapsing into a single slot.
+- **Claiming preserved** — a top score whose player skipped initials entry is still claimable later from the web UI.
+- **Scope** — Williams/Bally System 9/11 (`src/common`) and Williams WPC (`src/wpc`); `em` and `data_east` are unchanged.
+- **On upgrade** — existing On-Machine units switch from "prompt every game" to "prompt for the top 10" automatically (a legacy stored cutoff of `0` resolves to the default 10).
+
+Design and rationale: [`docs/superpowers/specs/2026-05-30-top-n-high-score-trigger-design.md`](docs/superpowers/specs/2026-05-30-top-n-high-score-trigger-design.md).
+
+### Other changes
+
+- **WiFi resilience** — recovers a dropped or silently-degraded WiFi link *in place* (a real gateway-liveness probe instead of trusting `isconnected()`, plus a radio-only reconnect) and closes an HTTP socket/TCP-PCB leak that could make the board unreachable after hours — all **without ever resetting the Pico**, since a reset would reboot the attached game. Adds `conns=`/`free=`/`up=` fields to the serial `RESOURCE` log for diagnosis.
+- **Branding** — ToadRats header logo and label in the web UI.
 
 ## Features
 
