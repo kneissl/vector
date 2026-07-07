@@ -58,13 +58,36 @@ headers: {self.headers}
 body: {self.body}"""
 
 
+# Bounds so a slow/silent/hostile client can't park a connection (and its scarce
+# lwIP TCP-PCB) forever or exhaust RAM. _READ_TIMEOUT is applied per read phase
+# in _handle_request via uasyncio.wait_for.
+_READ_TIMEOUT = 10  # seconds; LAN clients complete a request well within this
+_MAX_HEADERS = 50
+_MAX_BODY = 32 * 1024
+
+# Count of in-flight request handlers == roughly the number of client TCP-PCBs
+# in use. Exposed for the resource log so a PCB leak shows up as a rising trend.
+_active_conns = 0
+
+
+def active_connection_count():
+    return _active_conns
+
+
 async def _parse_headers(reader):
     headers = {}
+    count = 0
     while True:
         header_line = await reader.readline()
-        if header_line == b"\r\n":  # crlf denotes body start
+        if header_line == b"\r\n" or header_line == b"":  # blank line = body start; b"" = EOF
             break
-        name, value = header_line.decode().strip().split(": ", 1)
+        count += 1
+        if count > _MAX_HEADERS:
+            raise ValueError("too many headers")
+        try:
+            name, value = header_line.decode().strip().split(": ", 1)
+        except ValueError:
+            continue  # tolerate a malformed header line rather than dropping the request
         headers[name.lower()] = value
     return headers
 
@@ -74,6 +97,8 @@ async def _parse_json_body(reader, headers):
     import json
 
     content_length_bytes = int(headers["content-length"])
+    if content_length_bytes < 0 or content_length_bytes > _MAX_BODY:
+        raise ValueError("content-length out of range")
     body = await reader.readexactly(content_length_bytes)
     body_str = body.decode()
     return body_str, json.loads(body_str)
@@ -81,12 +106,20 @@ async def _parse_json_body(reader, headers):
 
 # handle an incoming request to the web server
 async def _handle_request(reader, writer):
+    global _active_conns
+    _active_conns += 1
     try:
         response = None
 
         request_start_time = time.ticks_ms()
 
-        request_line = await reader.readline()
+        # Every read is bounded: a client that opens a connection and then sends
+        # nothing (browser preconnect) or a half-open socket left by a WiFi blip
+        # would otherwise park here forever, pinning a TCP-PCB for the life of
+        # the board. On timeout/any error we fall through to the finally that
+        # closes the socket -- which #364's inner finally could not do, because
+        # it only ran after the request fully parsed and a handler returned.
+        request_line = await uasyncio.wait_for(reader.readline(), _READ_TIMEOUT)
         try:
             method, uri, protocol = request_line.decode().split()
         except Exception as e:
@@ -102,10 +135,10 @@ async def _handle_request(reader, writer):
             logging.info(f"Route not found: {request.path}")
 
         # TODO make parsing json and headers lazy
-        request.headers = await _parse_headers(reader)
+        request.headers = await uasyncio.wait_for(_parse_headers(reader), _READ_TIMEOUT)
         if "content-length" in request.headers and "content-type" in request.headers:
             if request.headers["content-type"].startswith("application/json"):
-                raw_body, parsed_data = await _parse_json_body(reader, request.headers)
+                raw_body, parsed_data = await uasyncio.wait_for(_parse_json_body(reader, request.headers), _READ_TIMEOUT)
                 request.raw_data = raw_body
                 request.data = parsed_data
 
@@ -138,47 +171,50 @@ async def _handle_request(reader, writer):
             if hasattr(body, "__len__"):
                 response.add_header("Content-Length", len(body))
 
-        try:
-            # write status line
-            writer.write(f"HTTP/1.1 {response.status} {response.status}\r\n".encode("ascii"))
+        # write status line
+        writer.write(f"HTTP/1.1 {response.status} {response.status}\r\n".encode("ascii"))
 
-            # write headers
-            for key, value in response.headers.items():
-                writer.write(f"{key}: {value}\r\n".encode("ascii"))
+        # write headers
+        for key, value in response.headers.items():
+            writer.write(f"{key}: {value}\r\n".encode("ascii"))
 
-            # blank line to denote end of headers
-            writer.write("\r\n".encode("ascii"))
+        # blank line to denote end of headers
+        writer.write("\r\n".encode("ascii"))
 
-            if type(response.body).__name__ == "generator":
-                # generator
-                try:
-                    for chunk in response.body:
-                        writer.write(chunk)
-                        await writer.drain()
-                except Exception as e:
-                    # Connection dropped mid-stream (e.g. WiFi/power blip). Log
-                    # the path so truncated asset transfers are identifiable,
-                    # then re-raise; the finally below still closes the socket.
-                    logging.error(f"Truncated streamed response for {request.path}: {e}")
-                    raise
-            else:
-                # string/bytes
-                writer.write(response.body)
-                await writer.drain()
-        finally:
-            # Always close the writer, even on a mid-stream exception, so we
-            # don't leak the client socket/PCB after a truncated response.
+        if type(response.body).__name__ == "generator":
+            # generator
             try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
+                for chunk in response.body:
+                    writer.write(chunk)
+                    await writer.drain()
+            except Exception as e:
+                # Connection dropped mid-stream (e.g. WiFi/power blip). Log the
+                # path so truncated asset transfers are identifiable, then
+                # re-raise; the outer finally still closes the socket.
+                logging.error(f"Truncated streamed response for {request.path}: {e}")
+                raise
+        else:
+            # string/bytes
+            writer.write(response.body)
+            await writer.drain()
 
         processing_time = time.ticks_ms() - request_start_time
         logging.info(f"> {request.method} {request.path} ({response.status}) [{processing_time}ms]")
     except Exception as e:
         # last line of defense to keep server from crashing
         logging.error(f"Error handling request: {e}")
+    finally:
+        # Close the client socket on EVERY exit path -- early return on a
+        # malformed request line, a header/body parse error, a read timeout, a
+        # handler exception, or a clean response. This is the fix for the
+        # TCP-PCB leak: the pool is tiny (~16) and a leaked PCB is never
+        # reclaimed promptly, so unclosed sockets exhaust accept() over hours.
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        _active_conns -= 1
 
 
 # adds a new route to the routing table
@@ -215,7 +251,17 @@ def update_time(retry=1):
 
 
 def initialize_timedate():
+    import network
     from machine import RTC
+
+    # Do NOT attempt NTP unless we truly have L3. On CYW43, socket.getaddrinfo()
+    # with the interface active-but-routeless can block the whole VM forever
+    # (micropython#18797) -- a power-cycle-only hang. Re-check shortly.
+    wlan = network.WLAN(network.STA_IF)
+    if not wlan.isconnected() or wlan.ifconfig()[0] == "0.0.0.0":
+        print("   Skipping NTP sync: no L3 route yet, will retry.")
+        schedule(initialize_timedate, 25000)
+        return
 
     rtc = RTC()
 
@@ -366,14 +412,23 @@ def create_schedule(ap_mode: bool = False):
         # ping peers to detect offline devices every 15 seconds
         schedule(ping_random_peer, 12000, 15000)
 
-        # reconnect to wifi occasionally
-        schedule(connect_to_wifi, 0, 120000, log="Server: Check Wifi")
+        # check wifi liveness (L3 probe) and reconnect if needed
+        schedule(connect_to_wifi, 0, 30000, log="Server: Check Wifi")
 
     restart_schedule()
 
 
+def _loop_exception_handler(loop, context):
+    # Surface uncaught task exceptions instead of letting a task die silently.
+    try:
+        logging.error(f"Uncaught loop exception: {context.get('message')} {context.get('exception')}")
+    except Exception:
+        pass
+
+
 def run(ap_mode: bool, host="0.0.0.0", port=80):
     logging.info("> starting web server on port {}".format(port))
+    loop.set_exception_handler(_loop_exception_handler)
     loop.create_task(uasyncio.start_server(_handle_request, host, port, backlog=5))
     create_schedule(ap_mode)
     loop.create_task(run_scheduled())

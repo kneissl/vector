@@ -48,6 +48,7 @@ def _setup_sockets():
     if not send_sock:
         send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        send_sock.settimeout(0)  # non-blocking: a blocking sendto under TX backpressure stalls the whole loop
 
 
 _setup_sockets()
@@ -207,7 +208,12 @@ def _send(msg, addr=("255.255.255.255", _DISCOVERY_PORT)):
 
     global send_sock
     _setup_sockets()
-    send_sock.sendto(msg.encode(), addr)
+    try:
+        send_sock.sendto(msg.encode(), addr)
+    except OSError:
+        # Non-blocking socket may raise EAGAIN under TX backpressure; dropping a
+        # discovery packet is harmless and far better than stalling the loop.
+        pass
 
 
 def broadcast_hello():

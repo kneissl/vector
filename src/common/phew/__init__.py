@@ -34,21 +34,57 @@ def is_connected_to_wifi():
     import network
 
     wlan = network.WLAN(network.STA_IF)
-    return wlan.isconnected()
+    # Require a real DHCP lease, not just L2 association: isconnected() can stay
+    # True with the IP dropped to 0.0.0.0 after a lease lapse / AP reboot.
+    return wlan.isconnected() and wlan.ifconfig()[0] != "0.0.0.0"
 
 
-def reconnect_to_wifi():
-    if is_connected_to_wifi():
-        return
+def _gateway_reachable(gw, port=80, timeout_ms=1000):
+    # TCP connect to the gateway. A successful connect OR a fast failure
+    # (connection refused / reset) both prove the gateway answered at L3 -> link
+    # is alive. Only a full-timeout (no answer at all) means the link is dead.
+    # This is immune to the two failure modes a ping/ICMP probe suffers from:
+    # APs that drop ICMP, and gateways with no open port.
+    import time
+
+    import usocket
+
+    s = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
+    s.settimeout(timeout_ms / 1000)
+    start = time.ticks_ms()
+    try:
+        s.connect((gw, port))
+        return True
+    except OSError:
+        return time.ticks_diff(time.ticks_ms(), start) < (timeout_ms - 150)
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def wifi_link_alive():
+    """True only if we can actually reach the gateway (real L3 liveness).
+
+    Biased toward reporting DOWN when uncertain, because this gates reconnect:
+    a false 'up' is what bricks us (recovery never runs), while a false 'down'
+    just costs one unnecessary reconnect."""
     import network
 
+    wlan = network.WLAN(network.STA_IF)
+    if not wlan.isconnected():
+        return False
+    cfg = wlan.ifconfig()
+    if cfg[0] == "0.0.0.0":  # associated but no DHCP lease
+        return False
+    gw = cfg[2]
+    if not gw or gw == "0.0.0.0":
+        return False
     try:
-        wlan = network.WLAN(network.STA_IF)
-        wlan.active(True)
-        wlan.config(pm=0xA11140)  # disable power save; dozing radio drops packets
-        wlan.connect()
-    except Exception as e:
-        logging.error(f"Failed to reconnect to wifi: {e}")
+        return _gateway_reachable(gw)
+    except Exception:
+        return False  # treat probe error as link down -> reconnect
 
 
 # helper method to quickly get connected to wifi
@@ -67,6 +103,17 @@ def connect_to_wifi(ssid, password, timeout_seconds=30):
     }
 
     wlan = network.WLAN(network.STA_IF)
+    # Tear the radio fully down before reconnecting. Re-issuing connect() on a
+    # driver stuck half-associated (the state that makes isconnected() lie) is
+    # commonly ignored by the firmware; the active(False)->active(True) cycle
+    # forces it out of that state so the fresh connect() is honored. It also
+    # tends to flush leaked lwIP state from the previous association.
+    try:
+        wlan.disconnect()
+    except Exception:
+        pass
+    wlan.active(False)
+    time.sleep(0.5)  # let the chip fully deinit
     wlan.active(True)
     wlan.config(pm=0xA11140)  # disable power save; dozing radio drops packets
     wlan.connect(ssid, password)

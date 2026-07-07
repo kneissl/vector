@@ -45,4 +45,22 @@ def go(details=False):
     #if ram_usage_percent > 85 or flash_usage_percent > 85 or stack_percent > 85:
     #    Log.log(f"RESOURCE: RAM={ram_usage_percent:.0f}%, Flash={flash_usage_percent:.0f}%, Stack={stack_percent:.0f}%")
 
-    print(f"RESOURCE: RAM={ram_usage_percent:.0f}%, Flash={flash_usage_percent:.0f}%, Stack={stack_percent:.0f}%")
+    # Extra signals to diagnose the after-hours hang at the next failure:
+    #   free  -> raw heap bytes (a steady decline => memory/fragmentation path)
+    #   conns -> in-flight HTTP handlers ~= client TCP-PCBs (a climb to ~16 that
+    #            stalls there == the socket/PCB exhaustion path)
+    #   up    -> seconds of uptime (timestamps the failure / shows reboots)
+    import time
+
+    free_bytes = gc.mem_free()
+    try:
+        from phew.server import active_connection_count
+
+        conns = active_connection_count()
+    except Exception:
+        conns = -1
+
+    print(
+        f"RESOURCE: RAM={ram_usage_percent:.0f}%, Flash={flash_usage_percent:.0f}%, "
+        f"Stack={stack_percent:.0f}%, free={free_bytes}B, conns={conns}, up={time.ticks_ms() // 1000}s"
+    )

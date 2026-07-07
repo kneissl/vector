@@ -2224,17 +2224,34 @@ def add_ap_mode_routes():
         return available_networks
 
 
+_wifi_probe_failures = 0
+
+
 def connect_to_wifi():
+    global _wifi_probe_failures
+    from phew import get_ip_address
     from phew import is_connected_to_wifi as phew_is_connected
+    from phew import wifi_link_alive
     from phew.server import initialize_timedate, schedule
 
-    if phew_is_connected():
-        # Already associated (e.g. after a soft reboot, where the wifi chip
-        # keeps its connection). Still report the IP so it shows on the terminal.
-        from phew import get_ip_address
-
+    # L3-aware liveness gate. wlan.isconnected() (L2) can stay True while the
+    # route is dead (DHCP lapse, AP reboot, WPA2 rekey) -- which is exactly what
+    # let the board sit dark for hours: the old isconnected() gate returned True
+    # and recovery never ran. Trust only a real gateway round-trip.
+    if wifi_link_alive():
+        _wifi_probe_failures = 0
         print(f"Connected to wifi with IP address: {get_ip_address()}")
         return True
+
+    # Debounce: require 2 consecutive failed probes before bouncing the radio,
+    # so a single slow/dropped probe during congestion doesn't trigger a needless
+    # reconnect (which blocks the cooperative loop for several seconds).
+    _wifi_probe_failures += 1
+    if _wifi_probe_failures < 2:
+        print("Server: wifi liveness probe failed (1/2) - rechecking before reconnect")
+        return False
+    _wifi_probe_failures = 0
+    print("Server: wifi liveness probe failed (2/2) - forcing reconnect")
 
     Pico_Led.start_slow_blink()
 
@@ -2297,6 +2314,15 @@ except Exception:
 
 def go(ap_mode):
     """Start the server and run the main loop"""
+    # Log why we just booted -- distinguishes a brownout/crash reset (the noisy
+    # pinball power rail) from a clean power cycle, visible in the serial log.
+    try:
+        import machine
+
+        print(f"BOOT: reset_cause={machine.reset_cause()}")
+    except Exception:
+        pass
+
     # Allocate PICO led early - this grabs DMA0&1 and PIO1_SM0 before memory interfaces setup
     # wifi uses PICO LED to indicate status (since it is on wifi chip via spi also)
     Pico_Led.off()
