@@ -144,7 +144,13 @@ def status():
 # lazy so desktop pytest can import this module) ----
 
 def _elapsed(now_ms, then_ms, ticks_diff):
-    return _NEVER if then_ms is None else ticks_diff(now_ms, then_ms)
+    if then_ms is None:
+        return _NEVER
+    d = ticks_diff(now_ms, then_ms)
+    # ticks_diff is only faithful for spans under half the wrap period
+    # (~6 days on rp2); a negative result means "older than that", which
+    # for every gate should read as very long ago, not as the future.
+    return d if d >= 0 else _NEVER
 
 
 def audit_tick():

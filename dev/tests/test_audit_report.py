@@ -97,3 +97,12 @@ def test_should_post_gating():
     # unchanged: only the 24h heartbeat posts
     assert not ar.should_post(changed=False, idle_ms=10 * MIN, since_attempt_ms=2 * HOUR, since_ok_ms=23 * HOUR)
     assert ar.should_post(changed=False, idle_ms=10 * MIN, since_attempt_ms=2 * HOUR, since_ok_ms=25 * HOUR)
+
+
+def test_elapsed_clamps_wrapped_negative_diffs():
+    # a machine dormant past the ticks_ms wrap window must read as
+    # long-idle (heartbeat due), never as recently-active
+    fake_diff = lambda now, then: now - then
+    assert ar._elapsed(100, None, fake_diff) == ar._NEVER
+    assert ar._elapsed(100, 40, fake_diff) == 60
+    assert ar._elapsed(100, 200, fake_diff) == ar._NEVER  # wrapped/negative
