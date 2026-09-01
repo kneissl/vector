@@ -28,3 +28,13 @@ def test_build_update_uses_resolved_dir(tmp_path):
     )
 
     assert "foo.txt" in output.read_text()
+
+
+def test_remove_extra_files_preserves_device_config(tmp_path):
+    # phone_home.json is written on-device by the operator; an update must
+    # never delete it even though it is not part of any build
+    from build_update import build_remove_extra_files_code
+
+    (tmp_path / "main.py").write_text("pass")
+    code = build_remove_extra_files_code(str(tmp_path)).decode()
+    assert "'/phone_home.json'" in code

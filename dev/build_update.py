@@ -167,7 +167,11 @@ def build_remove_extra_files_code(build_dir: str) -> bytes:
     Build a Micropython script that removes any file not present in 'build_dir'.
     Return it as raw bytes ready for base64 encoding.
     """
-    known_files = []
+    # Operator-written device state that no build contains but an update must
+    # never delete (e.g. the audit phone-home config entered via the web UI).
+    preserved_files = ["/phone_home.json"]
+
+    known_files = list(preserved_files)
     for root, _, files in os.walk(build_dir):
         for file_name in files:
             file_path = Path(root) / file_name
