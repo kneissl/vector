@@ -151,8 +151,8 @@ def build_payload(counters, serial, software_version, collector_version):
         payload["context"]["minuteson"] = counters["minutes_on"]
     if counters["balls_played"] is not None:
         payload["context"]["ballsplayed"] = counters["balls_played"]
-    # the gateway validates flips as a pair (flipper-wear tracking downstream):
-    # include the object only when both totals are readable
+    # both-or-neither by choice: a lone flipper total would skew the relative
+    # wear picture downstream, so send flips only when both sides read clean
     if counters["left_flips"] is not None and counters["right_flips"] is not None:
         payload["flips"] = {
             "left_total": counters["left_flips"],
