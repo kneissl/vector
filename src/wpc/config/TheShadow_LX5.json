@@ -25,6 +25,16 @@
       "ChecksumEndAdr": 7370,
       "ChecksumResultAdr": 7371
   },
+  "Audits": {
+      "Type": 10,
+      "EarningsTableAdr": 6169,
+      "GamesStartedAdr": 6277,
+      "MinutesOnAdr": 6337,
+      "CreditsOnMachineAdr": 7504,
+      "PendingCoinUnitsAdr": 7505,
+      "RecordSize": 6,
+      "CoinValueCents": [25, 25, 25, 25]
+  },
   "HighScores": {
       "Type": 10,
       "ScoreAdr": 7457,
