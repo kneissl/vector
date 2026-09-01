@@ -33,8 +33,14 @@ def test_build_update_uses_resolved_dir(tmp_path):
 def test_remove_extra_files_preserves_device_config(tmp_path):
     # phone_home.json is written on-device by the operator; an update must
     # never delete it even though it is not part of any build
+    import base64
+
     from dev.build_update import build_remove_extra_files_code
 
     (tmp_path / "main.py").write_text("pass")
-    code = build_remove_extra_files_code(str(tmp_path)).decode()
+    line = build_remove_extra_files_code(str(tmp_path))
+    if isinstance(line, bytes):
+        line = line.decode()
+    code = base64.b64decode(line.split("}", 1)[1].strip()).decode()
     assert "'/phone_home.json'" in code
+    assert "'/main.py'" in code  # build contents still listed
