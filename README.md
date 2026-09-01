@@ -36,6 +36,7 @@ Design and rationale: [`docs/superpowers/specs/2026-05-30-top-n-high-score-trigg
 
 - **WiFi resilience** — recovers a dropped or silently-degraded WiFi link *in place* (a real gateway-liveness probe instead of trusting `isconnected()`, plus a radio-only reconnect) and closes an HTTP socket/TCP-PCB leak that could make the board unreachable after hours — all **without ever resetting the Pico**, since a reset would reboot the attached game. Adds `conns=`/`free=`/`up=` fields to the serial `RESOURCE` log for diagnosis.
 - **Branding** — ToadRats header logo and label in the web UI.
+- **Audit phone-home** — WPC boards can post operator audits to a PinBooks ingest endpoint (`src/common/audit_report.py`; `/api/phone-home/config`).
 
 ## Features
 

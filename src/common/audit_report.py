@@ -138,3 +138,98 @@ def status():
         "token_set": bool(cfg.get("token")),
         "last_result": _state["last_result"],
     }
+
+
+# ---- scheduled tick (runs in the cooperative loop; every import below is
+# lazy so desktop pytest can import this module) ----
+
+def _elapsed(now_ms, then_ms, ticks_diff):
+    return _NEVER if then_ms is None else ticks_diff(now_ms, then_ms)
+
+
+def audit_tick():
+    """Scheduled every 5 minutes. Decides whether this is a safe, useful moment
+    to phone home, and does so. Any failure logs and waits for a later tick."""
+    try:
+        # cheap config gates first -- on a build/game without Audits support or
+        # an unconfigured device this returns before touching hardware modules,
+        # so the 5-minute tick stays a no-op instead of logging import errors
+        import SharedState as S
+
+        cfg = (getattr(S, "gdata", None) or {}).get("Audits")
+        ph = load_config()
+        if not cfg or not ph or not (ph.get("url") and ph.get("token") and ph.get("serial")):
+            return
+
+        import time
+
+        import DataMapper
+        from phew import is_connected_to_wifi
+
+        now = time.ticks_ms()
+        if DataMapper.get_ball_in_play() != 0:
+            _state["last_active"] = now
+            return
+        if not is_connected_to_wifi():
+            return
+
+        from Shadow_Ram_Definitions import shadowRam
+
+        counters = decode_audits(shadowRam, cfg)
+        if counters is None:
+            return  # mid-write snapshot; next tick
+
+        crc = state_crc(counters)
+        if not should_post(
+            changed=(crc != _state["last_crc"]),
+            idle_ms=_elapsed(now, _state["last_active"], time.ticks_diff),
+            since_attempt_ms=_elapsed(now, _state["last_attempt"], time.ticks_diff),
+            since_ok_ms=_elapsed(now, _state["last_ok"], time.ticks_diff),
+        ):
+            return
+
+        _state["last_attempt"] = now
+        if _post(ph, counters):
+            _state["last_ok"] = now
+            _state["last_crc"] = crc
+    except Exception as e:
+        print("AUDIT: tick error:", e)
+
+
+def _post(ph, counters):
+    """One synchronous HTTPS POST. Blocks the loop a few seconds -- acceptable
+    because audit_tick only reaches here on a machine idle for 5+ minutes."""
+    from logger import logger_instance
+
+    try:
+        import SharedState as S
+        from mrequests.mrequests import post
+
+        game_name = (getattr(S, "gdata", {}) or {}).get("GameInfo", {}).get("GameName", "")
+        payload = build_payload(
+            counters,
+            ph["serial"],
+            game_name,
+            "vector-" + getattr(S, "VectorVersion", "0"),
+        )
+        r = post(
+            ph["url"],
+            headers={
+                b"authorization": b"Bearer " + ph["token"].encode(),
+                b"content-type": b"application/json",
+            },
+            data=json.dumps(payload).encode(),
+            timeout=15,
+        )
+        ok = r.status_code in (200, 201)
+        _state["last_result"] = "%d @earnings=%d" % (r.status_code, counters["total_earnings_minor"])
+        r.close()
+        if ok:
+            logger_instance.log("AUDIT: posted, status %d" % r.status_code)
+        else:
+            logger_instance.log("AUDIT: gateway refused, status %d" % r.status_code)
+        return ok
+    except Exception as e:
+        _state["last_result"] = "error: %s" % e
+        logger_instance.log("AUDIT: post failed: %s" % e)
+        return False

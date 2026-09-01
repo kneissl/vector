@@ -415,6 +415,15 @@ def create_schedule(ap_mode: bool = False):
         # check wifi liveness (L3 probe) and reconnect if needed
         schedule(connect_to_wifi, 0, 30000, log="Server: Check Wifi")
 
+        # phone home audit reports; no-op unless the game defines Audits and
+        # the device is configured via /api/phone-home/config
+        try:
+            from audit_report import audit_tick
+
+            schedule(audit_tick, 90000, 5 * 60 * 1000)
+        except ImportError:
+            pass
+
     restart_schedule()
 
 
