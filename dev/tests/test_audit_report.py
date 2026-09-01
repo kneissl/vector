@@ -99,6 +99,11 @@ def test_should_post_gating():
     assert ar.should_post(changed=False, idle_ms=10 * MIN, since_attempt_ms=2 * HOUR, since_ok_ms=25 * HOUR)
 
 
+def test_default_ingest_url_constant():
+    assert ar.DEFAULT_INGEST_URL.startswith("https://")
+    assert ar.DEFAULT_INGEST_URL.endswith("/v1/audits")
+
+
 def test_elapsed_clamps_wrapped_negative_diffs():
     # a machine dormant past the ticks_ms wrap window must read as
     # long-idle (heartbeat due), never as recently-active

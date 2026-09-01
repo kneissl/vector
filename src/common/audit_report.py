@@ -25,6 +25,8 @@ except ImportError:
 
 CONFIG_PATH = "phone_home.json"
 
+DEFAULT_INGEST_URL = "https://pinbooks-ingest.troy-e1a.workers.dev/v1/audits"
+
 _SLOT_COUNT = 6  # left, center, right, 4th, paid credits, service credits
 
 MIN_POST_INTERVAL_MS = 60 * 60 * 1000       # never post more than hourly
@@ -132,8 +134,8 @@ _state = {"last_attempt": None, "last_ok": None, "last_crc": None, "last_active"
 def status():
     cfg = load_config() or {}
     return {
-        "configured": bool(cfg.get("url") and cfg.get("token") and cfg.get("serial")),
-        "url": cfg.get("url", ""),
+        "configured": bool(cfg.get("token") and cfg.get("serial")),
+        "url": cfg.get("url", "") or DEFAULT_INGEST_URL,
         "serial": cfg.get("serial", ""),
         "token_set": bool(cfg.get("token")),
         "last_result": _state["last_result"],
@@ -164,8 +166,9 @@ def audit_tick():
 
         cfg = (getattr(S, "gdata", None) or {}).get("Audits")
         ph = load_config()
-        if not cfg or not ph or not (ph.get("url") and ph.get("token") and ph.get("serial")):
+        if not cfg or not ph or not (ph.get("token") and ph.get("serial")):
             return
+        url = ph.get("url") or DEFAULT_INGEST_URL
 
         import time
 
@@ -195,14 +198,14 @@ def audit_tick():
             return
 
         _state["last_attempt"] = now
-        if _post(ph, counters):
+        if _post(url, ph, counters):
             _state["last_ok"] = now
             _state["last_crc"] = crc
     except Exception as e:
         print("AUDIT: tick error:", e)
 
 
-def _post(ph, counters):
+def _post(url, ph, counters):
     """One synchronous HTTPS POST. Blocks the loop a few seconds -- acceptable
     because audit_tick only reaches here on a machine idle for 5+ minutes."""
     from logger import logger_instance
@@ -219,7 +222,7 @@ def _post(ph, counters):
             "vector-" + getattr(S, "VectorVersion", "0"),
         )
         r = post(
-            ph["url"],
+            url,
             headers={
                 b"authorization": b"Bearer " + ph["token"].encode(),
                 b"content-type": b"application/json",
