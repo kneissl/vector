@@ -54,16 +54,20 @@ def decode_audits(mem, cfg):
         if not _check_ok(mem, a):
             return None
         slots.append(_val3(mem, a))
-    for a in (cfg["GamesStartedAdr"], cfg["MinutesOnAdr"]):
-        if not _check_ok(mem, a):
-            return None
+    if not _check_ok(mem, cfg["GamesStartedAdr"]):
+        return None
+    # minutes-on is best-effort: The Shadow maintains its check byte out of
+    # step with the counter after long uptimes (observed live: off by one),
+    # and it is a diagnostic that never reaches a ledger column -- a bad check
+    # byte here must not veto the money report.
+    minutes = _val3(mem, cfg["MinutesOnAdr"]) if _check_ok(mem, cfg["MinutesOnAdr"]) else None
     coin = cfg.get("CoinValueCents", [25, 25, 25, 25])
     return {
         "total_earnings_minor": sum(slots[i] * coin[i] for i in range(4)),
         "total_paid_credits": slots[4],
         "total_service_credits": slots[5],
         "gamesplayed": _val3(mem, cfg["GamesStartedAdr"]),
-        "minutes_on": _val3(mem, cfg["MinutesOnAdr"]),
+        "minutes_on": minutes,
         "credits_on_machine": mem[cfg["CreditsOnMachineAdr"]],
         "money_held_minor": mem[cfg["PendingCoinUnitsAdr"]] * coin[0],
     }
@@ -89,7 +93,7 @@ def state_crc(counters):
 def build_payload(counters, serial, software_version, collector_version):
     """The gateway's JJP-shaped body. No observed_at (server stamps time),
     no machine_id (identity comes from the bearer token)."""
-    return {
+    payload = {
         "game_serial": serial,
         "software_version": software_version,
         "collector_version": collector_version,
@@ -100,13 +104,15 @@ def build_payload(counters, serial, software_version, collector_version):
         },
         "context": {
             "gamesplayed": counters["gamesplayed"],
-            "minuteson": counters["minutes_on"],
         },
         "balances": {
             "credits_on_machine": counters["credits_on_machine"],
             "money_held_minor": counters["money_held_minor"],
         },
     }
+    if counters["minutes_on"] is not None:
+        payload["context"]["minuteson"] = counters["minutes_on"]
+    return payload
 
 
 def should_post(changed, idle_ms, since_attempt_ms, since_ok_ms):

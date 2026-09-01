@@ -136,3 +136,24 @@ def test_state_crc_ignores_minutes_on():
     b = dict(a)
     b["minutes_on"] += 60
     assert ar.state_crc(a) == ar.state_crc(b)
+
+
+def test_bad_minutes_on_check_does_not_block_report():
+    # The Shadow maintains the minutes-on check byte out of step with the
+    # counter (observed live: value 211, check off by one after hours of
+    # uptime). A diagnostic counter must not veto the money report.
+    mem = populated_mem()
+    mem[CFG["MinutesOnAdr"] + 3] ^= 0xFF
+    c = ar.decode_audits(mem, CFG)
+    assert c is not None
+    assert c["minutes_on"] is None
+    assert c["total_earnings_minor"] == 150  # money still strict and intact
+
+
+def test_payload_omits_minuteson_when_unreadable():
+    mem = populated_mem()
+    mem[CFG["MinutesOnAdr"] + 3] ^= 0xFF
+    c = ar.decode_audits(mem, CFG)
+    p = ar.build_payload(c, "12345", "The Shadow", "vector-1.11.30")
+    assert "minuteson" not in p["context"]
+    assert p["context"]["gamesplayed"] == 17
