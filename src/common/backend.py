@@ -536,6 +536,47 @@ def app_game_status(request):
     return cached_report()
 
 
+@add_route("/api/phone-home/status")
+def app_phone_home_status(request):
+    """
+    @api
+    summary: Phone-home configuration status (token never echoed)
+    response:
+      status_codes:
+        - code: 200
+          description: Status returned
+      body:
+        description: JSON with configured, url, serial, token_set, last_result
+    @end
+    """
+    import audit_report
+
+    return audit_report.status()
+
+
+@add_route("/api/phone-home/config", auth=True)
+def app_phone_home_config(request):
+    """
+    @api
+    summary: Set phone-home config (url, token, serial); omitted fields keep their value
+    response:
+      status_codes:
+        - code: 200
+          description: Saved
+    @end
+    """
+    import audit_report
+
+    data = request.data or {}
+    cfg = audit_report.load_config() or {}
+    for key in ("url", "token", "serial"):
+        value = data.get(key)
+        if value:
+            cfg[key] = str(value).strip()
+    audit_report.save_config(cfg)
+    return {"success": True}
+
+
 #
 # Leaderboard
 #

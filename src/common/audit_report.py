@@ -106,3 +106,35 @@ def should_post(changed, idle_ms, since_attempt_ms, since_ok_ms):
     if since_attempt_ms < MIN_POST_INTERVAL_MS:
         return False
     return changed or since_ok_ms >= HEARTBEAT_MS
+
+
+# ---- device configuration (flash file; FRAM config record is full) ----
+
+def load_config():
+    """{'url':..., 'token':..., 'serial':...} or None if unconfigured."""
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_config(cfg):
+    with open(CONFIG_PATH, "w") as f:
+        f.write(json.dumps(cfg))
+
+
+# runtime state, RAM-only: after a reboot one extra post happens and the
+# gateway dedupes it (event_id is content-derived).
+_state = {"last_attempt": None, "last_ok": None, "last_crc": None, "last_active": None, "last_result": None}
+
+
+def status():
+    cfg = load_config() or {}
+    return {
+        "configured": bool(cfg.get("url") and cfg.get("token") and cfg.get("serial")),
+        "url": cfg.get("url", ""),
+        "serial": cfg.get("serial", ""),
+        "token_set": bool(cfg.get("token")),
+        "last_result": _state["last_result"],
+    }
