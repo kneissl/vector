@@ -69,10 +69,18 @@ def decode_audits(mem, cfg):
     }
 
 
+# Counters that move on their own while the machine merely sits powered on.
+# They ride along in the payload but must not count as "the state changed",
+# or the board would re-post every hour with nobody playing.
+_CRC_EXCLUDE = ("minutes_on",)
+
+
 def state_crc(counters):
     """Cheap change detector over the decoded counters (order-independent)."""
     parts = []
     for k in sorted(counters):
+        if k in _CRC_EXCLUDE:
+            continue
         parts.append(k)
         parts.append(str(counters[k]))
     return crc32("|".join(parts).encode()) & 0xFFFFFFFF

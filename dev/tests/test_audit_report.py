@@ -127,3 +127,12 @@ def test_elapsed_clamps_wrapped_negative_diffs():
     assert ar._elapsed(100, None, fake_diff) == ar._NEVER
     assert ar._elapsed(100, 40, fake_diff) == 60
     assert ar._elapsed(100, 200, fake_diff) == ar._NEVER  # wrapped/negative
+
+
+def test_state_crc_ignores_minutes_on():
+    # minutes_on ticks every powered-on minute; if it participated in the
+    # change checksum the board would re-post hourly forever with no play
+    a = ar.decode_audits(populated_mem(), CFG)
+    b = dict(a)
+    b["minutes_on"] += 60
+    assert ar.state_crc(a) == ar.state_crc(b)
