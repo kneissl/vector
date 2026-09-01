@@ -92,6 +92,82 @@ async function getShowIP() {
   });
 }
 
+// Audit Phone-Home settings
+async function initAuditPhoneHome() {
+  const serialInput = await window.waitForElementById("phone-home-serial");
+  const urlInput = await window.waitForElementById("phone-home-url");
+  const tokenInput = await window.waitForElementById("phone-home-token");
+  const saveButton = await window.waitForElementById("phone-home-save");
+  const statusLine = await window.waitForElementById("phone-home-status");
+
+  async function refreshStatus() {
+    const response = await window.smartFetch(
+      "/api/phone-home/status",
+      null,
+      false,
+    );
+    if (!response.ok) {
+      throw new Error(`phone-home status fetch failed: ${response.status}`);
+    }
+    const data = await response.json();
+
+    serialInput.value = data.serial ?? "";
+    urlInput.value = data.url ?? "";
+    tokenInput.placeholder = data.token_set
+      ? "(token set - leave blank to keep)"
+      : "paste token";
+
+    let statusText = data.configured ? "Configured" : "Not configured";
+    if (data.last_result) {
+      statusText += ` (last result: ${data.last_result})`;
+    }
+    statusLine.innerText = statusText;
+  }
+
+  try {
+    await refreshStatus();
+  } catch (error) {
+    console.error("Failed to load phone-home status", error);
+    statusLine.innerText = "Unavailable";
+    return;
+  }
+
+  serialInput.disabled = false;
+  urlInput.disabled = false;
+  tokenInput.disabled = false;
+  saveButton.disabled = false;
+
+  saveButton.addEventListener("click", async () => {
+    // only send non-empty fields; omitted fields keep their stored value
+    const payload = {};
+    const serial = serialInput.value.trim();
+    const url = urlInput.value.trim();
+    const token = tokenInput.value.trim();
+    if (serial) payload.serial = serial;
+    if (url) payload.url = url;
+    if (token) payload.token = token;
+
+    saveButton.disabled = true;
+    try {
+      const response = await window.smartFetch(
+        "/api/phone-home/config",
+        payload,
+        true,
+      );
+      if (!response.ok) {
+        throw new Error(`phone-home config save failed: ${response.status}`);
+      }
+      tokenInput.value = "";
+      await refreshStatus();
+    } catch (error) {
+      console.error("Failed to save phone-home config", error);
+      alert("Failed to save phone-home settings.");
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+}
+
 async function loadSwitchDiagnostics() {
   const grid = await window.waitForElementById("switch-diagnostics-grid");
   grid.textContent = "Loading switch diagnostics...";
@@ -498,6 +574,7 @@ if (typeof window !== "undefined") {
   tournamentModeToggle();
   getScoreClaimMethods();
   getShowIP();
+  initAuditPhoneHome();
   initMidnightMadness();
   loadSwitchDiagnostics();
 

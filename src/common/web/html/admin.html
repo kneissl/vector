@@ -298,6 +298,47 @@
     </fieldset>
   </section>
   <section>
+    <h3>Audit Phone-Home</h3>
+    <fieldset id="phone-home-controls">
+      <label>
+        <b>Serial Number</b>
+        <input
+          id="phone-home-serial"
+          type="text"
+          name="phone-home-serial"
+          placeholder="Serial number"
+          disabled
+        />
+        <small>Must match this machine's serial number in PinBooks.</small>
+      </label>
+      <label>
+        <b>Ingest URL</b>
+        <input
+          id="phone-home-url"
+          type="text"
+          name="phone-home-url"
+          placeholder="https://..."
+          disabled
+        />
+      </label>
+      <label>
+        <b>Token</b>
+        <input
+          id="phone-home-token"
+          type="password"
+          name="phone-home-token"
+          placeholder="paste token"
+          disabled
+        />
+      </label>
+      <button id="phone-home-save" disabled>Save</button>
+      <div>
+        <b>Status:</b>
+        <span id="phone-home-status">Loading...</span>
+      </div>
+    </fieldset>
+  </section>
+  <section>
     <h3>Adjustments Profiles</h3>
     <div id="adjustments-not-supported" class="hide">
       Adjustment profiles are not yet supported for this game or rom. If you
