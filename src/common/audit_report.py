@@ -135,7 +135,8 @@ def status():
     cfg = load_config() or {}
     return {
         "configured": bool(cfg.get("token") and cfg.get("serial")),
-        "url": cfg.get("url", "") or DEFAULT_INGEST_URL,
+        "url": cfg.get("url", ""),
+        "default_url": DEFAULT_INGEST_URL,
         "serial": cfg.get("serial", ""),
         "token_set": bool(cfg.get("token")),
         "last_result": _state["last_result"],

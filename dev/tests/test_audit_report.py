@@ -104,6 +104,22 @@ def test_default_ingest_url_constant():
     assert ar.DEFAULT_INGEST_URL.endswith("/v1/audits")
 
 
+def test_status_reports_stored_url_and_default(monkeypatch):
+    # unconfigured device: stored url is empty, default is advertised separately
+    monkeypatch.setattr(ar, "load_config", lambda: None)
+    s = ar.status()
+    assert s["url"] == ""
+    assert s["default_url"] == ar.DEFAULT_INGEST_URL
+    assert not s["configured"]
+
+    # stored override is returned as-is, default still advertised
+    monkeypatch.setattr(ar, "load_config", lambda: {"url": "https://example.test/v1/audits", "token": "t", "serial": "s"})
+    s = ar.status()
+    assert s["url"] == "https://example.test/v1/audits"
+    assert s["default_url"] == ar.DEFAULT_INGEST_URL
+    assert s["configured"]
+
+
 def test_elapsed_clamps_wrapped_negative_diffs():
     # a machine dormant past the ticks_ms wrap window must read as
     # long-idle (heartbeat due), never as recently-active

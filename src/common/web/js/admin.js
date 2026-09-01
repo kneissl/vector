@@ -113,6 +113,7 @@ async function initAuditPhoneHome() {
 
     serialInput.value = data.serial ?? "";
     urlInput.value = data.url ?? "";
+    urlInput.placeholder = "default: " + data.default_url;
     tokenInput.placeholder = data.token_set
       ? "(token set - leave blank to keep)"
       : "paste token";
@@ -138,13 +139,12 @@ async function initAuditPhoneHome() {
   saveButton.disabled = false;
 
   saveButton.addEventListener("click", async () => {
-    // only send non-empty fields; omitted fields keep their stored value
-    const payload = {};
+    // token/serial: only send non-empty fields, omitted fields keep their
+    // stored value. url is always sent: an empty url reverts to the default.
+    const payload = { url: urlInput.value.trim() };
     const serial = serialInput.value.trim();
-    const url = urlInput.value.trim();
     const token = tokenInput.value.trim();
     if (serial) payload.serial = serial;
-    if (url) payload.url = url;
     if (token) payload.token = token;
 
     saveButton.disabled = true;
@@ -155,7 +155,12 @@ async function initAuditPhoneHome() {
         true,
       );
       if (!response.ok) {
-        throw new Error(`phone-home config save failed: ${response.status}`);
+        if (response.status !== 401) {
+          // 401 already alerted the user that their password was wrong
+          console.error("Failed to save phone-home config:", response.status);
+          alert("Failed to save phone-home settings.");
+        }
+        return;
       }
       tokenInput.value = "";
       await refreshStatus();

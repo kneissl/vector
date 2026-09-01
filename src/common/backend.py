@@ -558,7 +558,7 @@ def app_phone_home_status(request):
 def app_phone_home_config(request):
     """
     @api
-    summary: Set phone-home config (url, token, serial); omitted fields keep their value
+    summary: Set phone-home config (url, token, serial); omitted fields keep their value, empty url reverts to the default
     response:
       status_codes:
         - code: 200
@@ -569,10 +569,16 @@ def app_phone_home_config(request):
 
     data = request.data or {}
     cfg = audit_report.load_config() or {}
-    for key in ("url", "token", "serial"):
+    for key in ("token", "serial"):
         value = data.get(key)
         if value:
             cfg[key] = str(value).strip()
+    if "url" in data:
+        value = str(data.get("url") or "").strip()
+        if value:
+            cfg["url"] = value
+        else:
+            cfg.pop("url", None)  # cleared field = revert to firmware default
     audit_report.save_config(cfg)
     return {"success": True}
 
