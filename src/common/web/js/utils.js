@@ -55,7 +55,17 @@ async function confirmAction(message, callback, cancelCallback = null) {
 }
 
 async function smartFetch(url, data = false, auth = true) {
-  console.log({ url, data, auth });
+  // redact secrets from the debug log
+  let loggedData = data;
+  if (data && typeof data === "object") {
+    loggedData = { ...data };
+    for (const key of Object.keys(loggedData)) {
+      if (/^(token|password)$/i.test(key) && loggedData[key]) {
+        loggedData[key] = "<redacted>";
+      }
+    }
+  }
+  console.log({ url, data: loggedData, auth });
   const headers = {
     "Content-Type": "application/json",
   };
