@@ -43,6 +43,15 @@ def _check_ok(mem, a):
     return mem[a + 3] == (0xFF - ((mem[a] + mem[a + 1] + mem[a + 2]) & 0xFF)) & 0xFF
 
 
+def _opt_counter(mem, cfg, key):
+    """Optional play counter: None when the address is unconfigured (older
+    game configs) or its check byte fails -- never a reason to veto a report."""
+    a = cfg.get(key)
+    if a is None or not _check_ok(mem, a):
+        return None
+    return _val3(mem, a)
+
+
 def decode_audits(mem, cfg):
     """Decode the audit counters, or None if any check byte fails
     (a mid-write snapshot; skip this tick and try again later)."""
@@ -62,6 +71,23 @@ def decode_audits(mem, cfg):
     # byte here must not veto the money report.
     minutes = _val3(mem, cfg["MinutesOnAdr"]) if _check_ok(mem, cfg["MinutesOnAdr"]) else None
     coin = cfg.get("CoinValueCents", [25, 25, 25, 25])
+
+    # recent-earnings block: same 6-slot layout as the main table, but
+    # best-effort -- any bad check byte nulls both fields without vetoing.
+    recent_minor = recent_paid = None
+    rbase = cfg.get("RecentEarningsTableAdr")
+    if rbase is not None:
+        rslots = []
+        for i in range(_SLOT_COUNT):
+            a = rbase + i * rec
+            if not _check_ok(mem, a):
+                rslots = None
+                break
+            rslots.append(_val3(mem, a))
+        if rslots is not None:
+            recent_minor = sum(rslots[i] * coin[i] for i in range(4))
+            recent_paid = rslots[4]
+
     return {
         "total_earnings_minor": sum(slots[i] * coin[i] for i in range(4)),
         "total_paid_credits": slots[4],
@@ -70,6 +96,12 @@ def decode_audits(mem, cfg):
         "minutes_on": minutes,
         "credits_on_machine": mem[cfg["CreditsOnMachineAdr"]],
         "money_held_minor": mem[cfg["PendingCoinUnitsAdr"]] * coin[0],
+        "total_plays": _opt_counter(mem, cfg, "TotalPlaysAdr"),
+        "balls_played": _opt_counter(mem, cfg, "BallsPlayedAdr"),
+        "left_flips": _opt_counter(mem, cfg, "LeftFlipperAdr"),
+        "right_flips": _opt_counter(mem, cfg, "RightFlipperAdr"),
+        "recent_earnings_minor": recent_minor,
+        "recent_paid_credits": recent_paid,
     }
 
 
@@ -103,7 +135,12 @@ def build_payload(counters, serial, software_version, collector_version):
             "total_service_credits": counters["total_service_credits"],
         },
         "context": {
-            "gamesplayed": counters["gamesplayed"],
+            # JJP sends both: gamesplayed is the total-plays counter when
+            # readable (falls back to games-started for older configs or a
+            # bad check byte); gamestarts is always the games-started counter
+            # (unvalidated by the gateway, lands in raw_payload only).
+            "gamesplayed": counters["total_plays"] if counters["total_plays"] is not None else counters["gamesplayed"],
+            "gamestarts": counters["gamesplayed"],
         },
         "balances": {
             "credits_on_machine": counters["credits_on_machine"],
@@ -112,6 +149,19 @@ def build_payload(counters, serial, software_version, collector_version):
     }
     if counters["minutes_on"] is not None:
         payload["context"]["minuteson"] = counters["minutes_on"]
+    if counters["balls_played"] is not None:
+        payload["context"]["ballsplayed"] = counters["balls_played"]
+    # the gateway validates flips as a pair (flipper-wear tracking downstream):
+    # include the object only when both totals are readable
+    if counters["left_flips"] is not None and counters["right_flips"] is not None:
+        payload["flips"] = {
+            "left_total": counters["left_flips"],
+            "right_total": counters["right_flips"],
+        }
+    if counters["recent_earnings_minor"] is not None:
+        payload["audit"]["recent_earnings_minor"] = counters["recent_earnings_minor"]
+    if counters["recent_paid_credits"] is not None:
+        payload["audit"]["recent_paid_credits"] = counters["recent_paid_credits"]
     return payload
 
 
