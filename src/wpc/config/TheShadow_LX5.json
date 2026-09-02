@@ -27,6 +27,9 @@
   },
   "Audits": {
       "Type": 10,
+      "Endian": "little",
+      "CheckByteOffset": 3,
+      "TableBaseAdr": 6163,
       "EarningsTableAdr": 6169,
       "GamesStartedAdr": 6277,
       "MinutesOnAdr": 6337,

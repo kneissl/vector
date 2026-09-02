@@ -43,14 +43,17 @@ def test_earnings_block_decode_and_derived_cents():
 
 
 def test_anchors_from_config_fishtales():
+    """Fish Tales sits on its own table base, carried in its Audits block."""
     cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
-    a = dw.anchors_from_config(cfg, table_base=TABLE_BASE)
+    a = dw.anchors_from_config(cfg)
     assert a["credits_on_machine"] == 7307 + 8      # GCChecksumResultAdr + 8
     assert a["pending_coin_units"] == 7307 + 9
     assert a["adj_ck_start"] == 6941                # Adjustments.ChecksumStartAdr
-    assert a["earnings_total"] == TABLE_BASE + 6
-    assert a["games_started"] == TABLE_BASE + 114
-    assert a["minutes_on"] == TABLE_BASE + 174
+    # base 0x1811, two lower than the Shadow's -- confirmed against the menu
+    assert a["table_base"] == 0x1811
+    assert a["earnings_total"] == 6167
+    assert a["games_started"] == 6275
+    assert a["minutes_on"] == 6335
 
 
 def test_anchors_from_config_shadow_matches_verified_addresses():
@@ -70,3 +73,102 @@ def test_find_blocks_locates_planted_block():
         put_counter(buf, base + i * 6, v)
     hits = dw.find_blocks(buf, [1, 2, 3, 4, 5, 6], TABLE_BASE, 6941)
     assert hits == [base]
+
+
+# --- per-game counter format -------------------------------------------------
+#
+# The Shadow stores counters little-endian with the check byte at +3; Fish Tales
+# stores them big-endian with the check byte at +5. Same 6-byte grid, same
+# 0xFF-minus-sum checksum. Format therefore travels in the config, not in code.
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+# Read off the Fish Tales operator menu on 2026-09-02, same session as the dump.
+FT_MENU = {
+    "games started": (6275, 2381),
+    "total plays": (6281, 2361),
+    "replay awards": (6293, 203),
+    "extra balls": (6323, 243),
+    "left flipper": (6653, 116444),
+    "right flipper": (6659, 111767),
+    "recent left slot": (6203, 3237),
+    "recent right slot": (6215, 4206),
+    "recent paid credits": (6227, 1852),
+    "recent service credits": (6233, 120),
+}
+
+
+def put_counter_be(buf, addr, value, ck_off=5):
+    buf[addr] = (value >> 16) & 0xFF
+    buf[addr + 1] = (value >> 8) & 0xFF
+    buf[addr + 2] = value & 0xFF
+    buf[addr + ck_off] = (0xFF - ((buf[addr] + buf[addr + 1] + buf[addr + 2]) & 0xFF)) & 0xFF
+
+
+def test_big_endian_value_and_shifted_check_byte():
+    buf = make_buf()
+    put_counter_be(buf, 100, 0x030201)
+    assert dw.val(buf, 100, big=True) == 0x030201
+    assert dw.check_ok(buf, 100, ck_off=5)
+    # the little-endian reading of the same bytes is a different number
+    assert dw.val(buf, 100) == 0x010203
+    buf[105] ^= 0xFF
+    assert not dw.check_ok(buf, 100, ck_off=5)
+
+
+def test_fmt_from_config_defaults_to_shadow_rules():
+    """Configs written before the format was known keep working unchanged."""
+    assert dw.fmt_from_config({}) == (False, 3)
+    shadow = json.load(open(REPO / "src" / "wpc" / "config" / "TheShadow_LX5.json"))
+    assert dw.fmt_from_config(shadow) == (False, 3)
+
+
+def test_fmt_from_config_fishtales_is_big_endian():
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    assert dw.fmt_from_config(cfg) == (True, 5)
+
+
+def test_real_fishtales_dump_matches_the_operator_menu():
+    """The whole point: config + decoder reproduce what the menu showed."""
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    big, ck_off = dw.fmt_from_config(cfg)
+    buf = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+    for label, (addr, expected) in FT_MENU.items():
+        assert dw.val(buf, addr, big=big) == expected, label
+        assert dw.check_ok(buf, addr, ck_off=ck_off), label
+
+
+def test_real_fishtales_dump_derives_menu_earnings():
+    """Recent earnings is computed from the coin slots: menu read $1,860.75."""
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    big, ck_off = dw.fmt_from_config(cfg)
+    buf = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+    block = dw.decode_block(buf, 6203, [25, 25, 25, 25], big=big, ck_off=ck_off)
+    assert block["checks_ok"]
+    assert block["derived_earnings_cents"] == 186075
+
+
+def test_shadow_rules_misread_the_fishtales_dump():
+    """Guard the regression that started all this: little-endian on a
+    big-endian game yields garbage that fails its own check bytes."""
+    buf = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+    assert dw.val(buf, 6275) != 2381
+    assert not dw.check_ok(buf, 6275)
+
+
+def test_two_coin_dump_moves_the_expected_slots():
+    """One left-slot and one right-slot coin, captured on the machine."""
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    big, ck_off = dw.fmt_from_config(cfg)
+    a = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+    b = dw.load(str(FIXTURES / "fishtales_L5_two_coins.txt"))
+    for base in (6167, 6203, 6239):        # TOTAL, RECENT-B, RECENT-C
+        before = dw.decode_block(a, base, [25, 25, 25, 25], big=big, ck_off=ck_off)
+        after = dw.decode_block(b, base, [25, 25, 25, 25], big=big, ck_off=ck_off)
+        assert after["left slot"] - before["left slot"] == 1, base
+        assert after["right slot"] - before["right slot"] == 1, base
+        assert after["center slot"] == before["center slot"], base
+        assert after["checks_ok"]
+    # 4 quarters to the credit on this machine, so two coins are still pending
+    assert b[cfg["Audits"]["CreditsOnMachineAdr"]] == 0
+    assert b[cfg["Audits"]["PendingCoinUnitsAdr"]] == 2

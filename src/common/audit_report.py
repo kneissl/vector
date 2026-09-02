@@ -11,6 +11,9 @@ lazily inside audit_tick()/_post(). Timestamps are deliberately absent from the
 payload -- the server stamps observation time, so this module has no clock,
 timezone or NTP dependency.
 
+Counter byte order and check-byte position are per-game (see _fmt); everything
+else about the record layout is WPC-wide.
+
 Reference decoder with the same byte rules: tools/decode_wpc_audits.py.
 """
 try:
@@ -35,21 +38,36 @@ IDLE_MS = 5 * 60 * 1000                     # machine quiet this long before TLS
 _NEVER = 1 << 40                            # "elapsed" stand-in for never-happened
 
 
-def _val3(mem, a):
+def _val3(mem, a, big=False):
+    if big:
+        return (mem[a] << 16) | (mem[a + 1] << 8) | mem[a + 2]
     return mem[a] | (mem[a + 1] << 8) | (mem[a + 2] << 16)
 
 
-def _check_ok(mem, a):
-    return mem[a + 3] == (0xFF - ((mem[a] + mem[a + 1] + mem[a + 2]) & 0xFF)) & 0xFF
+def _check_ok(mem, a, ck_off=3):
+    return mem[a + ck_off] == (0xFF - ((mem[a] + mem[a + 1] + mem[a + 2]) & 0xFF)) & 0xFF
 
 
-def _opt_counter(mem, cfg, key):
+def _fmt(cfg):
+    """(big_endian, check_byte_offset) for this game.
+
+    The 6-byte grid and the 0xFF-minus-sum checksum are WPC-wide, but the byte
+    order and the check byte's position inside the record are not: The Shadow
+    is little-endian with the check at +3, Fish Tales big-endian with it at +5.
+    Defaults reproduce the Shadow, so configs written before this was known are
+    unaffected. Getting it wrong is silent -- the numbers look plausible and
+    only the check bytes disagree -- so confirm a new title against its
+    operator menu before trusting it."""
+    return cfg.get("Endian", "little") == "big", cfg.get("CheckByteOffset", 3)
+
+
+def _opt_counter(mem, cfg, key, big=False, ck_off=3):
     """Optional play counter: None when the address is unconfigured (older
     game configs) or its check byte fails -- never a reason to veto a report."""
     a = cfg.get(key)
-    if a is None or not _check_ok(mem, a):
+    if a is None or not _check_ok(mem, a, ck_off):
         return None
-    return _val3(mem, a)
+    return _val3(mem, a, big)
 
 
 def decode_audits(mem, cfg):
@@ -57,19 +75,20 @@ def decode_audits(mem, cfg):
     (a mid-write snapshot; skip this tick and try again later)."""
     base = cfg["EarningsTableAdr"]
     rec = cfg.get("RecordSize", 6)
+    big, ck_off = _fmt(cfg)
     slots = []
     for i in range(_SLOT_COUNT):
         a = base + i * rec
-        if not _check_ok(mem, a):
+        if not _check_ok(mem, a, ck_off):
             return None
-        slots.append(_val3(mem, a))
-    if not _check_ok(mem, cfg["GamesStartedAdr"]):
+        slots.append(_val3(mem, a, big))
+    if not _check_ok(mem, cfg["GamesStartedAdr"], ck_off):
         return None
     # minutes-on is best-effort: The Shadow maintains its check byte out of
     # step with the counter after long uptimes (observed live: off by one),
     # and it is a diagnostic that never reaches a ledger column -- a bad check
     # byte here must not veto the money report.
-    minutes = _val3(mem, cfg["MinutesOnAdr"]) if _check_ok(mem, cfg["MinutesOnAdr"]) else None
+    minutes = _val3(mem, cfg["MinutesOnAdr"], big) if _check_ok(mem, cfg["MinutesOnAdr"], ck_off) else None
     coin = cfg.get("CoinValueCents", [25, 25, 25, 25])
 
     # recent-earnings block: same 6-slot layout as the main table, but
@@ -80,10 +99,10 @@ def decode_audits(mem, cfg):
         rslots = []
         for i in range(_SLOT_COUNT):
             a = rbase + i * rec
-            if not _check_ok(mem, a):
+            if not _check_ok(mem, a, ck_off):
                 rslots = None
                 break
-            rslots.append(_val3(mem, a))
+            rslots.append(_val3(mem, a, big))
         if rslots is not None:
             recent_minor = sum(rslots[i] * coin[i] for i in range(4))
             recent_paid = rslots[4]
@@ -92,14 +111,14 @@ def decode_audits(mem, cfg):
         "total_earnings_minor": sum(slots[i] * coin[i] for i in range(4)),
         "total_paid_credits": slots[4],
         "total_service_credits": slots[5],
-        "gamesplayed": _val3(mem, cfg["GamesStartedAdr"]),
+        "gamesplayed": _val3(mem, cfg["GamesStartedAdr"], big),
         "minutes_on": minutes,
         "credits_on_machine": mem[cfg["CreditsOnMachineAdr"]],
         "money_held_minor": mem[cfg["PendingCoinUnitsAdr"]] * coin[0],
-        "total_plays": _opt_counter(mem, cfg, "TotalPlaysAdr"),
-        "balls_played": _opt_counter(mem, cfg, "BallsPlayedAdr"),
-        "left_flips": _opt_counter(mem, cfg, "LeftFlipperAdr"),
-        "right_flips": _opt_counter(mem, cfg, "RightFlipperAdr"),
+        "total_plays": _opt_counter(mem, cfg, "TotalPlaysAdr", big, ck_off),
+        "balls_played": _opt_counter(mem, cfg, "BallsPlayedAdr", big, ck_off),
+        "left_flips": _opt_counter(mem, cfg, "LeftFlipperAdr", big, ck_off),
+        "right_flips": _opt_counter(mem, cfg, "RightFlipperAdr", big, ck_off),
         "recent_earnings_minor": recent_minor,
         "recent_paid_credits": recent_paid,
     }

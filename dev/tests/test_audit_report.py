@@ -248,3 +248,108 @@ def test_bad_recent_earnings_check_nulls_both_recent_fields():
     assert "recent_earnings_minor" not in p["audit"]
     assert "recent_paid_credits" not in p["audit"]
     assert p["audit"]["total_earnings_minor"] == 150  # main block untouched
+
+
+# --- per-game counter format -------------------------------------------------
+#
+# The Shadow is little-endian with the check byte at +3; Fish Tales is
+# big-endian with it at +5. decode_audits() must take both from the config and
+# keep behaving exactly as before when a config says nothing.
+
+import json
+
+REPO = Path(__file__).resolve().parents[2]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+FT_CFG = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))["Audits"]
+
+
+def load_dump(name):
+    return bytearray(int(x) for x in open(FIXTURES / name).read().split())
+
+
+def put_counter_be(mem, addr, value, ck_off=5):
+    mem[addr] = (value >> 16) & 0xFF
+    mem[addr + 1] = (value >> 8) & 0xFF
+    mem[addr + 2] = value & 0xFF
+    mem[addr + ck_off] = (0xFF - ((mem[addr] + mem[addr + 1] + mem[addr + 2]) & 0xFF)) & 0xFF
+
+
+def test_val3_and_check_ok_honour_format_args():
+    mem = make_mem()
+    put_counter_be(mem, 100, 0x030201)
+    assert ar._val3(mem, 100, big=True) == 0x030201
+    assert ar._check_ok(mem, 100, ck_off=5)
+    assert ar._val3(mem, 100) == 0x010203          # little-endian default unchanged
+    assert not ar._check_ok(mem, 100)              # +3 default unchanged
+
+
+def test_decode_audits_reads_a_big_endian_game():
+    """Same fixture values as the Shadow tests, stored the Fish Tales way."""
+    cfg = dict(CFG, Endian="big", CheckByteOffset=5)
+    mem = make_mem()
+    for i, v in enumerate([2, 4, 0, 0, 6, 3]):
+        put_counter_be(mem, cfg["EarningsTableAdr"] + i * 6, v)
+    put_counter_be(mem, cfg["GamesStartedAdr"], 17)
+    put_counter_be(mem, cfg["MinutesOnAdr"], 1234)
+    for i, v in enumerate([1, 1, 0, 0, 2, 1]):
+        put_counter_be(mem, cfg["RecentEarningsTableAdr"] + i * 6, v)
+    for key, v in (("TotalPlaysAdr", 15), ("BallsPlayedAdr", 44),
+                   ("LeftFlipperAdr", 900), ("RightFlipperAdr", 901)):
+        put_counter_be(mem, cfg[key], v)
+    mem[cfg["CreditsOnMachineAdr"]] = 3
+    mem[cfg["PendingCoinUnitsAdr"]] = 2
+
+    got = ar.decode_audits(mem, cfg)
+    assert got is not None
+    assert got["total_earnings_minor"] == (2 + 4) * 25
+    assert got["total_paid_credits"] == 6
+    assert got["gamesplayed"] == 17
+    assert got["minutes_on"] == 1234
+    assert got["total_plays"] == 15
+    assert got["left_flips"] == 900
+    assert got["credits_on_machine"] == 3
+    assert got["money_held_minor"] == 50
+
+
+def test_decode_audits_rejects_a_mid_write_big_endian_snapshot():
+    cfg = dict(CFG, Endian="big", CheckByteOffset=5)
+    mem = make_mem()
+    for i, v in enumerate([2, 4, 0, 0, 6, 3]):
+        put_counter_be(mem, cfg["EarningsTableAdr"] + i * 6, v)
+    put_counter_be(mem, cfg["GamesStartedAdr"], 17)
+    mem[cfg["EarningsTableAdr"] + 5] ^= 0xFF       # corrupt one check byte
+    assert ar.decode_audits(mem, cfg) is None
+
+
+def test_decode_real_fishtales_dump_matches_the_operator_menu():
+    """End to end: shipped config + real hardware dump == what the menu showed."""
+    got = ar.decode_audits(load_dump("fishtales_L5_baseline.txt"), FT_CFG)
+    assert got is not None
+    assert got["gamesplayed"] == 2381                  # games started
+    assert got["total_plays"] == 2361
+    assert got["left_flips"] == 116444
+    assert got["right_flips"] == 111767
+    assert got["total_paid_credits"] == 1897
+    assert got["total_service_credits"] == 120
+    assert got["recent_earnings_minor"] == 186075      # menu: $1,860.75
+    assert got["recent_paid_credits"] == 1852
+    assert got["balls_played"] is None                 # not mapped on this title
+
+
+def test_real_fishtales_two_coin_dump_shows_money_held():
+    """Fish Tales is $1.00/play, so two quarters sit pending, not credited."""
+    got = ar.decode_audits(load_dump("fishtales_L5_two_coins.txt"), FT_CFG)
+    assert got is not None
+    assert got["credits_on_machine"] == 0
+    assert got["money_held_minor"] == 50
+
+
+def test_fishtales_payload_is_well_formed():
+    counters = ar.decode_audits(load_dump("fishtales_L5_baseline.txt"), FT_CFG)
+    payload = ar.build_payload(counters, "FT-0001", "L-5", "test")
+    assert payload["audit"]["recent_earnings_minor"] == 186075
+    assert payload["context"]["gamesplayed"] == 2361    # total plays wins
+    assert payload["context"]["gamestarts"] == 2381
+    assert payload["flips"] == {"left_total": 116444, "right_total": 111767}
+    assert "ballsplayed" not in payload["context"]

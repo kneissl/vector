@@ -25,6 +25,28 @@
       "ChecksumEndAdr": 7160,
       "ChecksumResultAdr": 7161
   },
+  "Audits": {
+      "Type": 10,
+      "Endian": "big",
+      "CheckByteOffset": 5,
+      "TableBaseAdr": 6161,
+      "EarningsTableAdr": 6167,
+      "RecentEarningsTableAdr": 6203,
+      "GamesStartedAdr": 6275,
+      "TotalPlaysAdr": 6281,
+      "MinutesOnAdr": 6335,
+      "LeftFlipperAdr": 6653,
+      "RightFlipperAdr": 6659,
+      "CreditsOnMachineAdr": 7315,
+      "PendingCoinUnitsAdr": 7316,
+      "RecordSize": 6,
+      "CoinValueCents": [
+          25,
+          25,
+          25,
+          25
+      ]
+  },
   "HighScores": {
       "Type": 10,
       "ScoreAdr": 7268,
