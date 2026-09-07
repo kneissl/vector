@@ -420,7 +420,7 @@ def create_schedule(ap_mode: bool = False):
         try:
             from audit_report import audit_tick
 
-            schedule(audit_tick, 90000, 5 * 60 * 1000)
+            schedule(audit_tick, 90000, 60 * 1000)
         except ImportError:
             pass
 

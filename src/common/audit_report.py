@@ -34,7 +34,7 @@ _SLOT_COUNT = 6  # left, center, right, 4th, paid credits, service credits
 
 MIN_POST_INTERVAL_MS = 60 * 60 * 1000       # never post more than hourly
 HEARTBEAT_MS = 24 * 60 * 60 * 1000          # post unchanged state daily
-IDLE_MS = 5 * 60 * 1000                     # machine quiet this long before TLS
+IDLE_MS = 2 * 60 * 1000                     # machine quiet this long before TLS
 _NEVER = 1 << 40                            # "elapsed" stand-in for never-happened
 
 

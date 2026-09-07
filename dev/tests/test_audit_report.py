@@ -116,7 +116,7 @@ HOUR = 60 * MIN
 
 def test_should_post_gating():
     # not idle long enough
-    assert not ar.should_post(changed=True, idle_ms=4 * MIN, since_attempt_ms=2 * HOUR, since_ok_ms=2 * HOUR)
+    assert not ar.should_post(changed=True, idle_ms=1 * MIN, since_attempt_ms=2 * HOUR, since_ok_ms=2 * HOUR)
     # attempted too recently
     assert not ar.should_post(changed=True, idle_ms=10 * MIN, since_attempt_ms=30 * MIN, since_ok_ms=2 * HOUR)
     # changed and clear to go
