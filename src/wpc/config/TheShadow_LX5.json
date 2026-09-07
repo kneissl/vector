@@ -1,160 +1,348 @@
 {
   "GameInfo": {
-      "GameName": "The Shadow",
-      "System": "WPC",
-      "FileVer": 1
+    "GameName": "The Shadow",
+    "System": "WPC",
+    "FileVer": 1
   },
   "BallInPlay": {
-      "Type": 1,
-      "Address": 950
+    "Type": 1,
+    "Address": 950
   },
   "DisplayMessage": {
-      "Type": 10,
-      "AddressS1": 7742,
-      "AddressS2": 7807,
-      "AddressS3": 7872,
-      "Length": 32,
-      "ChecksumStartAdr": 7742,
-      "ChecksumEndAdr": 7934,
-      "ChecksumResultAdr": 7935
+    "Type": 10,
+    "AddressS1": 7742,
+    "AddressS2": 7807,
+    "AddressS3": 7872,
+    "Length": 32,
+    "ChecksumStartAdr": 7742,
+    "ChecksumEndAdr": 7934,
+    "ChecksumResultAdr": 7935
   },
   "Adjustments": {
-      "Type": 10,
-      "CustomMessageOn": 7162,
-      "ChecksumStartAdr": 7121,
-      "ChecksumEndAdr": 7370,
-      "ChecksumResultAdr": 7371
+    "Type": 10,
+    "CustomMessageOn": 7162,
+    "ChecksumStartAdr": 7121,
+    "ChecksumEndAdr": 7370,
+    "ChecksumResultAdr": 7371
   },
   "Audits": {
-      "Type": 10,
-      "Endian": "little",
-      "CheckByteOffset": 3,
-      "TableBaseAdr": 6163,
-      "EarningsTableAdr": 6169,
-      "GamesStartedAdr": 6277,
-      "MinutesOnAdr": 6337,
-      "TotalPlaysAdr": 6283,
-      "BallsPlayedAdr": 6343,
-      "LeftFlipperAdr": 6655,
-      "RightFlipperAdr": 6661,
-      "RecentEarningsTableAdr": 6205,
-      "CreditsOnMachineAdr": 7504,
-      "PendingCoinUnitsAdr": 7505,
-      "RecordSize": 6,
-      "CoinValueCents": [25, 25, 25, 25]
+    "Type": 10,
+    "Endian": "big",
+    "CheckByteOffset": 5,
+    "TableBaseAdr": 6161,
+    "EarningsTableAdr": 6167,
+    "RecentEarningsTableAdr": 6203,
+    "GamesStartedAdr": 6275,
+    "TotalPlaysAdr": 6281,
+    "BallsPlayedAdr": 6341,
+    "MinutesOnAdr": 6335,
+    "LeftFlipperAdr": 6653,
+    "RightFlipperAdr": 6659,
+    "CreditsOnMachineAdr": 7504,
+    "PendingCoinUnitsAdr": 7505,
+    "RecordSize": 6,
+    "_CoinValueCents": "25/100/25 coin door: centre slot takes a dollar coin. Set from the physical door, not from data -- this machine's centre count is still 0, so no reading can tell the tables apart until the first dollar goes in and is mis-booked at 25c.",
+    "CoinValueCents": [
+      25,
+      100,
+      25,
+      25
+    ]
   },
   "HighScores": {
-      "Type": 10,
-      "ScoreAdr": 7457,
-      "BytesInScore": 5,
-      "ScoreSpacing": 8,
-      "InitialAdr": 7454,
-      "InitialSpacing": 8,
-      "NumberOfScores": 4,
-      "GrandChampScoreAdr": 7491,
-      "GrandChampInitAdr": 7488,
-      "ChecksumStartAdr": 7454,
-      "ChecksumEndAdr": 7485,
-      "ChecksumResultAdr": 7486,
-      "GCChecksumStartAdr": 7488,
-      "GCChecksumEndAdr": 7495,
-      "GCChecksumResultAdr": 7496
+    "Type": 10,
+    "ScoreAdr": 7457,
+    "BytesInScore": 5,
+    "ScoreSpacing": 8,
+    "InitialAdr": 7454,
+    "InitialSpacing": 8,
+    "NumberOfScores": 4,
+    "GrandChampScoreAdr": 7491,
+    "GrandChampInitAdr": 7488,
+    "ChecksumStartAdr": 7454,
+    "ChecksumEndAdr": 7485,
+    "ChecksumResultAdr": 7486,
+    "GCChecksumStartAdr": 7488,
+    "GCChecksumEndAdr": 7495,
+    "GCChecksumResultAdr": 7496
   },
   "HSRewards": {
-      "Type": 0,
-      "HS1": 0,
-      "HS2": 0,
-      "HS3": 0,
-      "HS4": 0,
-      "HS5": 0,
-      "DisableByte": 0
+    "Type": 0,
+    "HS1": 0,
+    "HS2": 0,
+    "HS3": 0,
+    "HS4": 0,
+    "HS5": 0,
+    "DisableByte": 0
   },
   "InPlay": {
-      "Type": 10,
-      "GameActiveAdr": 141,
-      "GameActiveValue": 0,
-      "Players": 5909,
-      "PlayerUp": 949,
-      "ScoreAdr": 5792,
-      "ScoreBytes": 5,
-      "ScoreSpacing": 6
+    "Type": 10,
+    "GameActiveAdr": 141,
+    "GameActiveValue": 0,
+    "Players": 5909,
+    "PlayerUp": 949,
+    "ScoreAdr": 5792,
+    "ScoreBytes": 5,
+    "ScoreSpacing": 6
   },
   "Switches": {
     "Type": 10,
     "Address": 5831,
     "Length": 64,
     "Names": [
-      ["Gun Trigger", 60],
-      ["Right Phurba Control", 60],
-      ["Start Button", 60],
-      ["Plumb Bob Tilt", 250],
-      ["Right Outlane", 60],
-      ["Right Return Lane", 60],
-      ["Left Return Lane", 60],
-      ["Left Outlane", 60],
-
-      ["Slam Tilt", 0],
-      ["Coin Door Closed", 60],
-      ["Buy-in Button", 60],
-      ["Always Closed", 0],
-      ["M Of Mongol Target", 60],
-      ["O1 Of Mongol Target", 60],
-      ["L Of Mongol Target", 60],
-      ["O2 Of Mongol Target", 60],
-
-      ["Left Ramp Enter", 60],
-      ["Right Ramp Enter", 60],
-      ["Inner Sanctum", 60],
-      ["Left Phurba Control", 60],
-      ["Left Rubber", 60],
-      ["Mini Kicker", 60],
-      ["Mini Limit Left", 60],
-      ["Mini Limit Right", 60],
-
-      ["Trough 1", 60],
-      ["Trough 2", 60],
-      ["Trough 3", 60],
-      ["Trough 4", 60],
-      ["Trough 5", 60],
-      ["Top Trough", 60],
-      ["Inner Loop Enter", 60],
-      ["Shooter", 60],
-
-      ["Wall Target Down", 60],
-      ["N Of Mongol Target", 60],
-      ["G Of Mongol Target", 60],
-      ["Left Loop Enter", 60],
-      ["Battle Drop Down", 60],
-      ["Center Standup", 60],
-      ["Right Loop Enter", 60],
-      ["Mini Exit Tube", 60],
-
-      ["Left Slingshot", 60],
-      ["Right Slingshot", 60],
-      ["Lockup Right", 60],
-      ["Lockup Middle", 60],
-      ["Lockup Left", 60],
-      ["Left Eject", 60],
-      ["Right Eject", 60],
-      ["Popper", 60],
-
-      ["Mini Left Standup 1", 60],
-      ["Mini Left Standup 2", 60],
-      ["Mini Left Standup 3", 60],
-      ["Mini Left Standup 4", 60],
-      ["Left Ramp Left Made", 60],
-      ["Left Ramp Right Made", 60],
-      ["Right Ramp Left Made", 60],
-      ["Right Ramp Right Made", 60],
-
-      ["Mini Right Standup 4", 60],
-      ["Mini Right Standup 3", 60],
+      [
+        "Gun Trigger",
+        60
+      ],
+      [
+        "Right Phurba Control",
+        60
+      ],
+      [
+        "Start Button",
+        60
+      ],
+      [
+        "Plumb Bob Tilt",
+        250
+      ],
+      [
+        "Right Outlane",
+        60
+      ],
+      [
+        "Right Return Lane",
+        60
+      ],
+      [
+        "Left Return Lane",
+        60
+      ],
+      [
+        "Left Outlane",
+        60
+      ],
+      [
+        "Slam Tilt",
+        0
+      ],
+      [
+        "Coin Door Closed",
+        60
+      ],
+      [
+        "Buy-in Button",
+        60
+      ],
+      [
+        "Always Closed",
+        0
+      ],
+      [
+        "M Of Mongol Target",
+        60
+      ],
+      [
+        "O1 Of Mongol Target",
+        60
+      ],
+      [
+        "L Of Mongol Target",
+        60
+      ],
+      [
+        "O2 Of Mongol Target",
+        60
+      ],
+      [
+        "Left Ramp Enter",
+        60
+      ],
+      [
+        "Right Ramp Enter",
+        60
+      ],
+      [
+        "Inner Sanctum",
+        60
+      ],
+      [
+        "Left Phurba Control",
+        60
+      ],
+      [
+        "Left Rubber",
+        60
+      ],
+      [
+        "Mini Kicker",
+        60
+      ],
+      [
+        "Mini Limit Left",
+        60
+      ],
+      [
+        "Mini Limit Right",
+        60
+      ],
+      [
+        "Trough 1",
+        60
+      ],
+      [
+        "Trough 2",
+        60
+      ],
+      [
+        "Trough 3",
+        60
+      ],
+      [
+        "Trough 4",
+        60
+      ],
+      [
+        "Trough 5",
+        60
+      ],
+      [
+        "Top Trough",
+        60
+      ],
+      [
+        "Inner Loop Enter",
+        60
+      ],
+      [
+        "Shooter",
+        60
+      ],
+      [
+        "Wall Target Down",
+        60
+      ],
+      [
+        "N Of Mongol Target",
+        60
+      ],
+      [
+        "G Of Mongol Target",
+        60
+      ],
+      [
+        "Left Loop Enter",
+        60
+      ],
+      [
+        "Battle Drop Down",
+        60
+      ],
+      [
+        "Center Standup",
+        60
+      ],
+      [
+        "Right Loop Enter",
+        60
+      ],
+      [
+        "Mini Exit Tube",
+        60
+      ],
+      [
+        "Left Slingshot",
+        60
+      ],
+      [
+        "Right Slingshot",
+        60
+      ],
+      [
+        "Lockup Right",
+        60
+      ],
+      [
+        "Lockup Middle",
+        60
+      ],
+      [
+        "Lockup Left",
+        60
+      ],
+      [
+        "Left Eject",
+        60
+      ],
+      [
+        "Right Eject",
+        60
+      ],
+      [
+        "Popper",
+        60
+      ],
+      [
+        "Mini Left Standup 1",
+        60
+      ],
+      [
+        "Mini Left Standup 2",
+        60
+      ],
+      [
+        "Mini Left Standup 3",
+        60
+      ],
+      [
+        "Mini Left Standup 4",
+        60
+      ],
+      [
+        "Left Ramp Left Made",
+        60
+      ],
+      [
+        "Left Ramp Right Made",
+        60
+      ],
+      [
+        "Right Ramp Left Made",
+        60
+      ],
+      [
+        "Right Ramp Right Made",
+        60
+      ],
+      [
+        "Mini Right Standup 4",
+        60
+      ],
+      [
+        "Mini Right Standup 3",
+        60
+      ],
       [],
-      ["Mini Right Standup 1", 60],
-      ["Mini Drop Left", 60],
-      ["Mini Drop Middle Left", 60],
-      ["Mini Drop Middle Right", 60],
-      ["Mini Drop Right", 60]
+      [
+        "Mini Right Standup 1",
+        60
+      ],
+      [
+        "Mini Drop Left",
+        60
+      ],
+      [
+        "Mini Drop Middle Left",
+        60
+      ],
+      [
+        "Mini Drop Middle Right",
+        60
+      ],
+      [
+        "Mini Drop Right",
+        60
+      ]
     ]
   }
 }

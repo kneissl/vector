@@ -332,6 +332,7 @@ def test_decode_real_fishtales_dump_matches_the_operator_menu():
     assert got["right_flips"] == 111767
     assert got["total_paid_credits"] == 1897
     assert got["total_service_credits"] == 120
+    assert got["total_earnings_minor"] == 403700       # menu: $4,037.00
     assert got["recent_earnings_minor"] == 186075      # menu: $1,860.75
     assert got["recent_paid_credits"] == 1852
     assert got["balls_played"] is None                 # not mapped on this title
@@ -353,3 +354,4 @@ def test_fishtales_payload_is_well_formed():
     assert payload["context"]["gamestarts"] == 2381
     assert payload["flips"] == {"left_total": 116444, "right_total": 111767}
     assert "ballsplayed" not in payload["context"]
+

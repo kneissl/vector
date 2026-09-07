@@ -40,9 +40,10 @@
       "CreditsOnMachineAdr": 7315,
       "PendingCoinUnitsAdr": 7316,
       "RecordSize": 6,
+      "_CoinValueCents": "25/100/25 coin door: centre slot takes a dollar coin. Menu-verified 2026-09-02 -- total $4,037.00 and recent $1,860.75 both reproduce exactly with this table, and only with it.",
       "CoinValueCents": [
           25,
-          25,
+          100,
           25,
           25
       ]

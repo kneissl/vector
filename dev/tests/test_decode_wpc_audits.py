@@ -172,3 +172,53 @@ def test_two_coin_dump_moves_the_expected_slots():
     # 4 quarters to the credit on this machine, so two coins are still pending
     assert b[cfg["Audits"]["CreditsOnMachineAdr"]] == 0
     assert b[cfg["Audits"]["PendingCoinUnitsAdr"]] == 2
+
+
+# Read off the Fish Tales operator menu, 2026-09-02, same session as the dumps.
+FT_MENU_TOTAL_CENTS = 403700    # $4,037.00
+FT_MENU_RECENT_CENTS = 186075   # $1,860.75
+
+
+def test_shipped_coin_table_reproduces_both_menu_earnings_figures():
+    """The centre slot is a $1.00 acceptor, not a quarter slot.
+
+    A uniform 25c table still reproduces the RECENT figure, because that
+    block's centre count is 0 -- so recent alone cannot validate the table and
+    the error hid until the TOTAL figure was read off the glass.
+    """
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    audits = cfg["Audits"]
+    coin = audits["CoinValueCents"]
+    big, ck_off = dw.fmt_from_config(cfg)
+    buf = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+
+    total = dw.decode_block(buf, audits["EarningsTableAdr"], coin, big=big, ck_off=ck_off)
+    recent = dw.decode_block(buf, audits["RecentEarningsTableAdr"], coin, big=big, ck_off=ck_off)
+    assert total["derived_earnings_cents"] == FT_MENU_TOTAL_CENTS
+    assert recent["derived_earnings_cents"] == FT_MENU_RECENT_CENTS
+
+
+def test_uniform_quarter_table_would_understate_the_total():
+    """Guard the specific regression: [25,25,25,25] silently loses $1,628.25."""
+    cfg = json.load(open(REPO / "src" / "wpc" / "config" / "FishTales_L5.json"))
+    big, ck_off = dw.fmt_from_config(cfg)
+    buf = dw.load(str(FIXTURES / "fishtales_L5_baseline.txt"))
+    wrong = dw.decode_block(buf, cfg["Audits"]["EarningsTableAdr"], [25, 25, 25, 25],
+                            big=big, ck_off=ck_off)
+    assert wrong["derived_earnings_cents"] != FT_MENU_TOTAL_CENTS
+
+
+def test_both_wpc_games_use_the_25_100_25_coin_door():
+    """Both cabinets run a 25/100/25 coin door: the centre slot takes a dollar
+    coin, not a quarter.
+
+    Fish Tales proves it arithmetically -- its menu total ($4,037.00) only
+    reproduces with the centre at 100c. The Shadow's centre count is still 0,
+    so no reading can distinguish the tables there yet and its value is set
+    from the physical coin door rather than from data. That is exactly why it
+    has to be set now: the error only becomes visible after the money is
+    already mis-booked.
+    """
+    for game in ("FishTales_L5", "FishTales_L4", "TheShadow_LX5"):
+        cfg = json.load(open(REPO / "src" / "wpc" / "config" / f"{game}.json"))
+        assert cfg["Audits"]["CoinValueCents"] == [25, 100, 25, 25], game
