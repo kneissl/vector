@@ -119,8 +119,10 @@ def test_big_endian_value_and_shifted_check_byte():
 def test_fmt_from_config_defaults_to_shadow_rules():
     """Configs written before the format was known keep working unchanged."""
     assert dw.fmt_from_config({}) == (False, 3)
+    assert dw.fmt_from_config({"Audits": {"EarningsTableAdr": 6169}}) == (False, 3)
+    # every shipped WPC block is on the corrected frame now
     shadow = json.load(open(REPO / "src" / "wpc" / "config" / "TheShadow_LX5.json"))
-    assert dw.fmt_from_config(shadow) == (False, 3)
+    assert dw.fmt_from_config(shadow) == (True, 5)
 
 
 def test_fmt_from_config_fishtales_is_big_endian():
