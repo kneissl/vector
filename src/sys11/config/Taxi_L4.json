@@ -26,6 +26,25 @@
         "InitialAdr": 1811,
         "BytesInScore": 4
     },
+    "Audits": {
+        "Type": 10,
+        "Endian": "big",
+        "Bcd": true,
+        "RecordSize": 4,
+        "CheckByteOffset": 3,
+        "TableBaseAdr": 1616,
+        "EarningsTableAdr": 1620,
+        "CoinSlotCount": 3,
+        "ServiceCredits": false,
+        "GamesStartedAdr": 1636,
+        "FreePlaysAdr": 1640,
+        "_MinutesOnAdr": "AU18 'Minutes of Play': game time, not power-on time as on WPC",
+        "MinutesOnAdr": 1664,
+        "BallsPlayedAdr": 1668,
+        "CreditsOnMachineAdr": 1794,
+        "PendingCoinUnitsAdr": 1793,
+        "CoinValueCents": [25, 25, 25]
+    },
     "InPlay": {
         "Type": 1,
         "ScoreAdr": 512,

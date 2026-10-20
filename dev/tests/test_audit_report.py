@@ -66,6 +66,7 @@ def test_decode_audits():
         "money_held_minor": 50,          # 2 pending units * 25c
         "total_plays": 5,
         "balls_played": 16,
+        "free_plays": None,
         "left_flips": 150,
         "right_flips": 227,
         "recent_earnings_minor": 250,    # (2+8) coins * 25c
@@ -355,3 +356,100 @@ def test_fishtales_payload_is_well_formed():
     assert payload["flips"] == {"left_total": 116444, "right_total": 111767}
     assert "ballsplayed" not in payload["context"]
 
+
+
+# --- System 11 (Taxi): 4-byte BCD records, 3 coin chutes, no service slot ----
+
+TAXI_CFG = json.load(open(REPO / "src" / "sys11" / "config" / "Taxi_L4.json"))["Audits"]
+
+
+def put_counter_bcd(mem, addr, value, ck_off=3):
+    """Big-endian BCD, two digits per byte, Sys11-style 4-byte record."""
+    digits = f"{value:06d}"
+    for i in range(3):
+        mem[addr + i] = (int(digits[2 * i]) << 4) | int(digits[2 * i + 1])
+    mem[addr + ck_off] = (0xFF - ((mem[addr] + mem[addr + 1] + mem[addr + 2]) & 0xFF)) & 0xFF
+
+
+def test_val3_decodes_bcd():
+    mem = bytearray(2048)
+    put_counter_bcd(mem, 100, 104)
+    assert mem[100:103] == bytes([0x00, 0x01, 0x04])   # not binary 104
+    assert ar._val3(mem, 100, big=True, bcd=True) == 104
+    assert ar._check_ok(mem, 100, ck_off=3)
+    put_counter_bcd(mem, 100, 123456)
+    assert ar._val3(mem, 100, big=True, bcd=True) == 123456
+
+
+def test_decode_audits_reads_a_sys11_bcd_game():
+    mem = bytearray(2048)
+    for i, v in enumerate([12, 0, 104, 28]):           # left,center,right,paid
+        put_counter_bcd(mem, TAXI_CFG["EarningsTableAdr"] + i * 4, v)
+    put_counter_bcd(mem, TAXI_CFG["GamesStartedAdr"], 33)
+    put_counter_bcd(mem, TAXI_CFG["FreePlaysAdr"], 8)
+    put_counter_bcd(mem, TAXI_CFG["MinutesOnAdr"], 16)
+    put_counter_bcd(mem, TAXI_CFG["BallsPlayedAdr"], 24)
+    mem[TAXI_CFG["CreditsOnMachineAdr"]] = 0x12        # BCD 12 credits
+    mem[TAXI_CFG["PendingCoinUnitsAdr"]] = 0x03
+
+    got = ar.decode_audits(mem, TAXI_CFG)
+    assert got is not None
+    assert got["total_earnings_minor"] == (12 + 0 + 104) * 25
+    assert got["total_paid_credits"] == 28
+    assert got["total_service_credits"] is None        # no such record on Sys11
+    assert got["gamesplayed"] == 33
+    assert got["free_plays"] == 8
+    assert got["minutes_on"] == 16
+    assert got["balls_played"] == 24
+    assert got["credits_on_machine"] == 12             # BCD byte, not 0x12=18
+    assert got["money_held_minor"] == 75
+    assert got["recent_earnings_minor"] is None        # no recent table on Sys11
+
+
+def test_sys11_mid_write_snapshot_still_vetoes():
+    mem = bytearray(2048)
+    for i, v in enumerate([12, 0, 104, 28]):
+        put_counter_bcd(mem, TAXI_CFG["EarningsTableAdr"] + i * 4, v)
+    put_counter_bcd(mem, TAXI_CFG["GamesStartedAdr"], 33)
+    mem[TAXI_CFG["EarningsTableAdr"] + 3] ^= 0xFF
+    assert ar.decode_audits(mem, TAXI_CFG) is None
+
+
+def test_sys11_payload_omits_service_credits_and_sends_freeplays():
+    mem = bytearray(2048)
+    for i, v in enumerate([12, 0, 104, 28]):
+        put_counter_bcd(mem, TAXI_CFG["EarningsTableAdr"] + i * 4, v)
+    put_counter_bcd(mem, TAXI_CFG["GamesStartedAdr"], 33)
+    put_counter_bcd(mem, TAXI_CFG["FreePlaysAdr"], 8)
+    put_counter_bcd(mem, TAXI_CFG["MinutesOnAdr"], 16)
+    put_counter_bcd(mem, TAXI_CFG["BallsPlayedAdr"], 24)
+    c = ar.decode_audits(mem, TAXI_CFG)
+    p = ar.build_payload(c, "TAXI-0001", "Taxi", "vector-test")
+    assert "total_service_credits" not in p["audit"]
+    assert p["context"]["freeplays"] == 8
+    assert p["context"]["gamesplayed"] == 33
+    assert p["context"]["gamestarts"] == 33
+    assert "flips" not in p
+
+
+def test_decode_real_taxi_dump_matches_the_operator_menu():
+    """Shipped config + real hardware dump == the operator menu + known events:
+    AU01=2, AU03 run to 104, minutes 16, balls 24, free 8, 2 credits on
+    the machine, nothing pending."""
+    got = ar.decode_audits(load_dump("taxi_L4_rightcoin104.txt"), TAXI_CFG)
+    assert got is not None
+    assert got["total_earnings_minor"] == (2 + 0 + 104) * 25
+    assert got["total_paid_credits"] == 28
+    assert got["total_service_credits"] is None
+    assert got["gamesplayed"] == 33
+    assert got["free_plays"] == 8
+    assert got["minutes_on"] == 16
+    assert got["balls_played"] == 24
+    assert got["credits_on_machine"] == 2
+    assert got["money_held_minor"] == 0
+
+
+def test_wpc_payload_still_carries_service_credits():
+    c = ar.decode_audits(populated_mem(), CFG)
+    p = ar.build_payload(c, "12345", "The Shadow", "vector-1.11.30")
+    assert p["audit"]["total_service_credits"] == 3

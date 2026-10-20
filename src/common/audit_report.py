@@ -2,7 +2,7 @@
 # https://creativecommons.org/licenses/by-nc/4.0/
 # This work is licensed under CC BY-NC 4.0
 """
-Audit phone-home: decode WPC operator audits from shadow RAM and post them to
+Audit phone-home: decode operator audits from shadow RAM and post them to
 the PinBooks ingest gateway.
 
 Pure logic (decode, payload, gating) lives at module top so desktop pytest can
@@ -11,8 +11,12 @@ lazily inside audit_tick()/_post(). Timestamps are deliberately absent from the
 payload -- the server stamps observation time, so this module has no clock,
 timezone or NTP dependency.
 
-Counter byte order and check-byte position are per-game (see _fmt); everything
-else about the record layout is WPC-wide.
+Counter byte order, check-byte position and digit encoding are per-game (see
+_fmt). WPC stores 3-byte binary counters on a 6-byte grid; System 11 stores
+3-byte BCD counters on a 4-byte grid with only three coin slots and no
+service-credit or recent-earnings records (verified on Taxi against its
+operator menu, snapshots/taxi/FINDINGS.md in the mapping workspace). The
+0xFF-minus-sum check byte is common to every title seen so far.
 
 Reference decoder with the same byte rules: tools/decode_wpc_audits.py.
 """
@@ -30,18 +34,25 @@ CONFIG_PATH = "phone_home.json"
 
 DEFAULT_INGEST_URL = "https://pinbooks-ingest.troy-e1a.workers.dev/v1/audits"
 
-_SLOT_COUNT = 6  # left, center, right, 4th, paid credits, service credits
-
 MIN_POST_INTERVAL_MS = 60 * 60 * 1000       # never post more than hourly
 HEARTBEAT_MS = 24 * 60 * 60 * 1000          # post unchanged state daily
 IDLE_MS = 2 * 60 * 1000                     # machine quiet this long before TLS
 _NEVER = 1 << 40                            # "elapsed" stand-in for never-happened
 
 
-def _val3(mem, a, big=False):
-    if big:
-        return (mem[a] << 16) | (mem[a + 1] << 8) | mem[a + 2]
-    return mem[a] | (mem[a + 1] << 8) | (mem[a + 2] << 16)
+def _bcd(b):
+    return (b >> 4) * 10 + (b & 0x0F)
+
+
+def _val3(mem, a, big=False, bcd=False):
+    b = (mem[a], mem[a + 1], mem[a + 2]) if big else (mem[a + 2], mem[a + 1], mem[a])
+    if bcd:
+        return (_bcd(b[0]) * 100 + _bcd(b[1])) * 100 + _bcd(b[2])
+    return (b[0] << 16) | (b[1] << 8) | b[2]
+
+
+def _val1(mem, a, bcd=False):
+    return _bcd(mem[a]) if bcd else mem[a]
 
 
 def _check_ok(mem, a, ck_off=3):
@@ -49,25 +60,26 @@ def _check_ok(mem, a, ck_off=3):
 
 
 def _fmt(cfg):
-    """(big_endian, check_byte_offset) for this game.
+    """(big_endian, check_byte_offset, bcd) for this game.
 
-    The 6-byte grid and the 0xFF-minus-sum checksum are WPC-wide, but the byte
-    order and the check byte's position inside the record are not: The Shadow
-    is little-endian with the check at +3, Fish Tales big-endian with it at +5.
+    The 0xFF-minus-sum checksum is universal so far, but nothing else is: The
+    Shadow is little-endian binary with the check at +3, Fish Tales big-endian
+    binary with it at +5, Taxi (System 11) big-endian BCD with it at +3.
     Defaults reproduce the Shadow, so configs written before this was known are
     unaffected. Getting it wrong is silent -- the numbers look plausible and
-    only the check bytes disagree -- so confirm a new title against its
-    operator menu before trusting it."""
-    return cfg.get("Endian", "little") == "big", cfg.get("CheckByteOffset", 3)
+    only the check bytes disagree (BCD vs binary not even that: both check
+    bytes validate, only the decoded value differs past 9) -- so confirm a new
+    title against its operator menu before trusting it."""
+    return cfg.get("Endian", "little") == "big", cfg.get("CheckByteOffset", 3), cfg.get("Bcd", False)
 
 
-def _opt_counter(mem, cfg, key, big=False, ck_off=3):
+def _opt_counter(mem, cfg, key, big=False, ck_off=3, bcd=False):
     """Optional play counter: None when the address is unconfigured (older
     game configs) or its check byte fails -- never a reason to veto a report."""
     a = cfg.get(key)
     if a is None or not _check_ok(mem, a, ck_off):
         return None
-    return _val3(mem, a, big)
+    return _val3(mem, a, big, bcd)
 
 
 def decode_audits(mem, cfg):
@@ -75,50 +87,55 @@ def decode_audits(mem, cfg):
     (a mid-write snapshot; skip this tick and try again later)."""
     base = cfg["EarningsTableAdr"]
     rec = cfg.get("RecordSize", 6)
-    big, ck_off = _fmt(cfg)
+    big, ck_off, bcd = _fmt(cfg)
+    # WPC: 4 coin slots, then paid, then service credits. System 11: 3 coin
+    # chutes, then paid, and no service-credit record at all.
+    n_coin = cfg.get("CoinSlotCount", 4)
+    n_slots = n_coin + 1 + (1 if cfg.get("ServiceCredits", True) else 0)
     slots = []
-    for i in range(_SLOT_COUNT):
+    for i in range(n_slots):
         a = base + i * rec
         if not _check_ok(mem, a, ck_off):
             return None
-        slots.append(_val3(mem, a, big))
+        slots.append(_val3(mem, a, big, bcd))
     if not _check_ok(mem, cfg["GamesStartedAdr"], ck_off):
         return None
     # minutes-on is best-effort: The Shadow maintains its check byte out of
     # step with the counter after long uptimes (observed live: off by one),
     # and it is a diagnostic that never reaches a ledger column -- a bad check
     # byte here must not veto the money report.
-    minutes = _val3(mem, cfg["MinutesOnAdr"], big) if _check_ok(mem, cfg["MinutesOnAdr"], ck_off) else None
+    minutes = _val3(mem, cfg["MinutesOnAdr"], big, bcd) if _check_ok(mem, cfg["MinutesOnAdr"], ck_off) else None
     coin = cfg.get("CoinValueCents", [25, 25, 25, 25])
 
-    # recent-earnings block: same 6-slot layout as the main table, but
+    # recent-earnings block: same slot layout as the main table, but
     # best-effort -- any bad check byte nulls both fields without vetoing.
     recent_minor = recent_paid = None
     rbase = cfg.get("RecentEarningsTableAdr")
     if rbase is not None:
         rslots = []
-        for i in range(_SLOT_COUNT):
+        for i in range(n_slots):
             a = rbase + i * rec
             if not _check_ok(mem, a, ck_off):
                 rslots = None
                 break
-            rslots.append(_val3(mem, a, big))
+            rslots.append(_val3(mem, a, big, bcd))
         if rslots is not None:
-            recent_minor = sum(rslots[i] * coin[i] for i in range(4))
-            recent_paid = rslots[4]
+            recent_minor = sum(rslots[i] * coin[i] for i in range(n_coin))
+            recent_paid = rslots[n_coin]
 
     return {
-        "total_earnings_minor": sum(slots[i] * coin[i] for i in range(4)),
-        "total_paid_credits": slots[4],
-        "total_service_credits": slots[5],
-        "gamesplayed": _val3(mem, cfg["GamesStartedAdr"], big),
+        "total_earnings_minor": sum(slots[i] * coin[i] for i in range(n_coin)),
+        "total_paid_credits": slots[n_coin],
+        "total_service_credits": slots[n_coin + 1] if len(slots) > n_coin + 1 else None,
+        "gamesplayed": _val3(mem, cfg["GamesStartedAdr"], big, bcd),
         "minutes_on": minutes,
-        "credits_on_machine": mem[cfg["CreditsOnMachineAdr"]],
-        "money_held_minor": mem[cfg["PendingCoinUnitsAdr"]] * coin[0],
-        "total_plays": _opt_counter(mem, cfg, "TotalPlaysAdr", big, ck_off),
-        "balls_played": _opt_counter(mem, cfg, "BallsPlayedAdr", big, ck_off),
-        "left_flips": _opt_counter(mem, cfg, "LeftFlipperAdr", big, ck_off),
-        "right_flips": _opt_counter(mem, cfg, "RightFlipperAdr", big, ck_off),
+        "credits_on_machine": _val1(mem, cfg["CreditsOnMachineAdr"], bcd),
+        "money_held_minor": _val1(mem, cfg["PendingCoinUnitsAdr"], bcd) * coin[0],
+        "total_plays": _opt_counter(mem, cfg, "TotalPlaysAdr", big, ck_off, bcd),
+        "balls_played": _opt_counter(mem, cfg, "BallsPlayedAdr", big, ck_off, bcd),
+        "free_plays": _opt_counter(mem, cfg, "FreePlaysAdr", big, ck_off, bcd),
+        "left_flips": _opt_counter(mem, cfg, "LeftFlipperAdr", big, ck_off, bcd),
+        "right_flips": _opt_counter(mem, cfg, "RightFlipperAdr", big, ck_off, bcd),
         "recent_earnings_minor": recent_minor,
         "recent_paid_credits": recent_paid,
     }
@@ -151,7 +168,6 @@ def build_payload(counters, serial, software_version, collector_version):
         "audit": {
             "total_earnings_minor": counters["total_earnings_minor"],
             "total_paid_credits": counters["total_paid_credits"],
-            "total_service_credits": counters["total_service_credits"],
         },
         "context": {
             # JJP sends both: gamesplayed is the total-plays counter when
@@ -166,10 +182,16 @@ def build_payload(counters, serial, software_version, collector_version):
             "money_held_minor": counters["money_held_minor"],
         },
     }
+    # System 11 keeps no service-credit record; the gateway treats every
+    # counter as optional, so absent beats a fabricated zero
+    if counters["total_service_credits"] is not None:
+        payload["audit"]["total_service_credits"] = counters["total_service_credits"]
     if counters["minutes_on"] is not None:
         payload["context"]["minuteson"] = counters["minutes_on"]
     if counters["balls_played"] is not None:
         payload["context"]["ballsplayed"] = counters["balls_played"]
+    if counters["free_plays"] is not None:
+        payload["context"]["freeplays"] = counters["free_plays"]
     # both-or-neither by choice: a lone flipper total would skew the relative
     # wear picture downstream, so send flips only when both sides read clean
     if counters["left_flips"] is not None and counters["right_flips"] is not None:
