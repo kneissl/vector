@@ -10,6 +10,7 @@ POSTs /api/phone-home/config, then prints /api/phone-home/status. Omitted
 fields keep their stored value, so a token can be rotated alone.
 """
 import argparse
+import getpass
 import hashlib
 import hmac
 import json
@@ -19,11 +20,16 @@ import urllib.request
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", required=True)
-    ap.add_argument("--password", required=True, help="the board's Gpassword")
+    ap.add_argument("--password", help="the board's Gpassword (prompted if omitted)")
     ap.add_argument("--url")
     ap.add_argument("--token")
+    ap.add_argument("--token-file", help="read the token from this file (stripped)")
     ap.add_argument("--serial")
     a = ap.parse_args()
+    if a.token_file:
+        a.token = open(a.token_file).read().strip()
+    if not a.password:
+        a.password = getpass.getpass("board Gpassword: ")
 
     fields = {k: v for k, v in (("url", a.url), ("token", a.token), ("serial", a.serial)) if v}
     if not fields:
