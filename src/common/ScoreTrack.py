@@ -13,7 +13,7 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
-from score_threshold import SEED_BAND, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot
+from score_threshold import build_seed_table, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot, matches_seeded_slot
 
 log = logger_instance
 
@@ -23,6 +23,9 @@ top_scores = []
 # Invariant: set by _remove_machine_scores (game start) before _read_machine_score
 # (game end) reads it back, same process, sequentially. Default 0 = filter inert.
 _seed_threshold = 0
+# (initials, score) pairs written into the machine table at game start; a slot
+# reading back unchanged is seed residue, not a player score. Empty = filter inert.
+_seeded_slots = []
 nGameIdleCounter = 0
 push_game_count = 0
 last_pushed_game = [["" , 0], ["", 0], ["", 0], ["", 0]]
@@ -129,8 +132,11 @@ def _read_machine_score(HighScores):
                 if high_scores[idx][0] in ["???", "", None, "   "]:  # no player, allow claim
                     high_scores[idx][0] = ""
 
-                if is_phantom_slot(high_scores[idx][0], high_scores[idx][1], _seed_threshold):
-                    high_scores[idx][1] = 0  # untouched seeded threshold slot, not a real score
+                if is_phantom_slot(high_scores[idx][0], high_scores[idx][1], _seed_threshold) or matches_seeded_slot(high_scores[idx][0], high_scores[idx][1], _seeded_slots):
+                    # untouched seeded slot (threshold phantom or re-seeded real top
+                    # score), not something scored this game
+                    high_scores[idx][0] = ""
+                    high_scores[idx][1] = 0
 
         # if we have high scores, intials AND in-play socres, put initials to the in play scores
         for in_play_score in in_play_scores:
@@ -232,17 +238,20 @@ def place_machine_scores():
 def _remove_machine_scores():
     """Prep the machine high-score table for forced initials entry.
 
-    When a top-N threshold applies, seed the four slots so the lowest slot equals
-    the Nth-place leaderboard score and the three slots above it are
-    threshold+1/+2/+3 (sentinel initials) — keeping the table validly descending
-    while gating prompts on beating the threshold. When the board is not yet full
-    (threshold 0) or on-machine entry is off, fall back to zeroing the slots so
-    every score qualifies (original behavior).
+    When a top-N threshold applies, seed the table honestly: real top
+    leaderboard entries (initials + score) in the upper slots, the Nth-place
+    score with blank initials in the lowest slot. The lowest slot gates the
+    initials prompt on making the top N, while players land in the slot they
+    actually earned — so the game's own per-level high score awards fire for
+    genuine placement instead of every qualifier landing in 1st. When the
+    board is not yet full (threshold 0) or on-machine entry is off, fall back
+    to zeroing the slots so every score qualifies (original behavior).
     """
-    global _seed_threshold
+    global _seed_threshold, _seeded_slots
 
     if not DataStore.read_record("extras", 0)["enter_initials_on_game"]:
         _seed_threshold = 0
+        _seeded_slots = []
         if S.gdata["HighScores"]["Type"] == 9:
             log.log("SCORE: Remove machine scores system 9")
             place_machine_scores()
@@ -250,18 +259,28 @@ def _remove_machine_scores():
 
     cutoff = clamp_cutoff(DataStore.read_record("extras", 0)["top_n_cutoff"])
     leaders = [DataStore.read_record("leaders", i) for i in range(DataStore.memory_map["leaders"]["count"])]
-    _seed_threshold = compute_threshold(leaders, cutoff)
+    seed_table = build_seed_table(leaders, cutoff)
+    if seed_table is None:
+        _seed_threshold = 0  # keep the readback phantom filter consistent with what was written
+        _seeded_slots = []
+    else:
+        _seed_threshold = compute_threshold(leaders, cutoff)
+        _seeded_slots = seed_table
 
     if S.gdata["HighScores"]["Type"] == 1:  # system 11 type 1
         log.log("SCORE: Seed machine scores type 1, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-            if _seed_threshold > 0:
-                # index 0 (1st place) = threshold+3 ... index 3 (lowest) = threshold
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
+            if seed_table is not None:
+                initials, score = seed_table[index]
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
+                initials = (initials + "   ")[:3]
                 for i in range(3):
-                    shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
+                    if initials == "   ":
+                        shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
+                    else:
+                        shadowRam[initial_start + i] = ord(initials[i])  # same encoding as place_machine_scores
             else:
                 for i in range(4):
                     shadowRam[score_start + i] = 0  # score
@@ -274,10 +293,13 @@ def _remove_machine_scores():
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-            if _seed_threshold > 0:
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(_seed_threshold + (SEED_BAND - index))
+            if seed_table is not None:
+                initials, score = seed_table[index]
+                shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
+                initials = (initials + "   ")[:3]
                 for i in range(3):
-                    shadowRam[initial_start + i] = 0x00  # sentinel initials -> reads blank
+                    # type 3 encoding; _ascii_to_type3 maps space to 0x00 (reads back blank)
+                    shadowRam[initial_start + i] = _ascii_to_type3(ord(initials[i]))
             else:
                 for i in range(4):
                     shadowRam[score_start + i] = 0

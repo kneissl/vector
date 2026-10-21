@@ -40,6 +40,57 @@ def compute_threshold(leaders, n):
     return score if score > 0 else 0
 
 
+def build_seed_table(leaders, cutoff, slots=4):
+    """Build the honest machine high-score seed table.
+
+    Returns `slots` (initials, score) pairs in non-increasing score order:
+    the real top leaderboard entries in the upper slots (so the machine's
+    per-level awards fire for genuine placement), band filler phantoms with
+    blank initials where cutoff < slots, and the top-N threshold score with
+    blank initials in the lowest slot (gating initials entry on making the
+    top N). Returns None when the threshold is 0 (board not yet full) or a
+    record in the honest range is corrupt — caller falls back to clearing
+    the table so every score qualifies.
+    """
+    threshold = compute_threshold(leaders, cutoff)
+    if threshold <= 0:
+        return None
+
+    honest_count = min(slots - 1, cutoff - 1)
+    table = []
+    for i in range(honest_count):
+        entry = leaders[i]
+        if not entry:
+            return None
+        table.append(((entry.get("initials") or ""), entry.get("score", 0)))
+
+    # filler phantoms between the honest slots and the threshold slot,
+    # clamped so the table never increases downward (tied leader scores)
+    for index in range(honest_count, slots - 1):
+        score = threshold + (slots - 1 - index)
+        if table and score > table[-1][1]:
+            score = table[-1][1]
+        table.append(("", score))
+
+    table.append(("", threshold))
+    return table
+
+
+def matches_seeded_slot(initials, score, seeded):
+    """True when a read-back machine slot is an untouched seeded entry.
+
+    `seeded` is the (initials, score) list written at game start. Initials
+    compare whitespace-insensitively (the machine pads to 3 chars; readback
+    may strip); None initials read as blank. A matching slot is not a new
+    player score and must not reach the leaderboard/claim/push paths.
+    """
+    key = (initials or "").strip()
+    for seed_initials, seed_score in seeded:
+        if score == seed_score and key == (seed_initials or "").strip():
+            return True
+    return False
+
+
 def is_phantom_slot(initials, score, threshold):
     """True when a machine high-score slot is an untouched seeded slot.
 

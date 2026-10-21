@@ -144,3 +144,120 @@ def test_dedupe_missing_initials_key_treated_as_blank():
     out = st.dedupe_leaderboard([{"score": 700}, L("", 200)], 20)
     # both have blank key -> collapse; highest (700) kept
     assert [e["score"] for e in out] == [700]
+
+
+# --- build_seed_table ---
+def full_board():
+    # 10 real entries, descending
+    return [L(f"P{i}{i}{i}"[:3], (10 - i) * 1_000_000) for i in range(10)]
+
+
+def test_seed_table_honest_top_slots_and_threshold_bottom():
+    leaders = full_board()
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out == [
+        ("P00", 10_000_000),
+        ("P11", 9_000_000),
+        ("P22", 8_000_000),
+        ("", 1_000_000),  # 10th place score gates entry
+    ]
+
+
+def test_seed_table_returns_none_when_board_not_full():
+    # threshold 0 -> caller falls back to clear-table seeding
+    leaders = [L("ABC", 5000), L("DEF", 4000)]
+    assert st.build_seed_table(leaders, 10, slots=4) is None
+
+
+def test_seed_table_cutoff_3_one_phantom_filler():
+    leaders = full_board()
+    out = st.build_seed_table(leaders, 3, slots=4)
+    # honest #1/#2, filler just above threshold, threshold = #3 score
+    assert out == [
+        ("P00", 10_000_000),
+        ("P11", 9_000_000),
+        ("", 8_000_001),
+        ("", 8_000_000),
+    ]
+
+
+def test_seed_table_cutoff_1_degenerates_to_band():
+    leaders = full_board()
+    out = st.build_seed_table(leaders, 1, slots=4)
+    assert out == [
+        ("", 10_000_003),
+        ("", 10_000_002),
+        ("", 10_000_001),
+        ("", 10_000_000),
+    ]
+
+
+def test_seed_table_tied_leaders_stay_non_increasing():
+    leaders = [L("AAA", 5000), L("BBB", 4000), L("CCC", 4000)] + [L("XXX", 100)] * 7
+    out = st.build_seed_table(leaders, 3, slots=4)
+    scores = [s for _, s in out]
+    assert scores == sorted(scores, reverse=True) or all(a >= b for a, b in zip(scores, scores[1:]))
+    # filler may not exceed the honest slot above it (BBB at 4000)
+    assert out[1] == ("BBB", 4000)
+    assert out[2][1] <= 4000
+    assert out[3] == ("", 4000)
+
+
+def test_seed_table_blank_initials_leader_preserved():
+    leaders = [L("AAA", 5000), L("", 4500)] + [L("XXX", 1000)] * 8
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out[1] == ("", 4500)
+
+
+def test_seed_table_wpc_five_slots():
+    leaders = full_board()
+    out = st.build_seed_table(leaders, 10, slots=5)
+    assert out == [
+        ("P00", 10_000_000),
+        ("P11", 9_000_000),
+        ("P22", 8_000_000),
+        ("P33", 7_000_000),
+        ("", 1_000_000),
+    ]
+
+
+def test_seed_table_none_leader_entry_in_honest_range():
+    # corrupt record inside the honest range -> no table (fall back to clearing)
+    leaders = [L("AAA", 5000), None] + [L("XXX", 1000)] * 8
+    assert st.build_seed_table(leaders, 10, slots=4) is None
+
+
+# --- matches_seeded_slot ---
+def test_matches_seeded_slot_exact_honest_entry():
+    seeded = [("ABC", 5_000_000), ("", 1_000_000)]
+    assert st.matches_seeded_slot("ABC", 5_000_000, seeded) is True
+
+
+def test_matches_seeded_slot_blank_threshold_entry():
+    seeded = [("ABC", 5_000_000), ("", 1_000_000)]
+    assert st.matches_seeded_slot("", 1_000_000, seeded) is True
+
+
+def test_matches_seeded_slot_new_score_same_initials():
+    seeded = [("ABC", 5_000_000)]
+    assert st.matches_seeded_slot("ABC", 6_000_000, seeded) is False
+
+
+def test_matches_seeded_slot_same_score_different_player():
+    seeded = [("ABC", 5_000_000)]
+    assert st.matches_seeded_slot("XYZ", 5_000_000, seeded) is False
+
+
+def test_matches_seeded_slot_whitespace_insensitive():
+    # machine pads initials to 3 chars with spaces
+    seeded = [("AB ", 5_000_000)]
+    assert st.matches_seeded_slot("AB", 5_000_000, seeded) is True
+
+
+def test_matches_seeded_slot_none_initials_treated_blank():
+    seeded = [("", 1_000_000)]
+    assert st.matches_seeded_slot(None, 1_000_000, seeded) is True
+
+
+def test_matches_seeded_slot_empty_seed_list():
+    assert st.matches_seeded_slot("ABC", 5_000_000, []) is False
