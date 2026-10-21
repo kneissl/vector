@@ -9,6 +9,17 @@ MAX_CUTOFF = 20  # leaders store capacity
 SEED_BAND = 3  # filler slots seeded just above the threshold (4-slot table -> +1,+2,+3)
 
 
+def pad_initials(initials):
+    """Normalize initials to exactly 3 characters, right-padded with spaces.
+
+    The machine high-score table has three fixed initial positions; a shorter
+    string (a player who entered one or two letters and left the rest blank)
+    must be space-padded, not rejected. Empty/None -> three spaces (the game
+    dislikes truly empty slots); longer than 3 is truncated.
+    """
+    return ((initials or "") + "   ")[:3]
+
+
 def clamp_cutoff(value, leaders_count=MAX_CUTOFF):
     """Normalize a stored cutoff to a valid top-N value.
 

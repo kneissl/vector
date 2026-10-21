@@ -11,6 +11,36 @@ def board(*scores):
     return [{"score": s} for s in scores]
 
 
+# --- pad_initials ---
+def test_pad_initials_single_letter():
+    # the Taxi bug: "G"/"H" must reach the machine as 3 chars, not be blanked
+    assert st.pad_initials("G") == "G  "
+
+
+def test_pad_initials_two_letters():
+    assert st.pad_initials("GG") == "GG "
+
+
+def test_pad_initials_three_letters_unchanged():
+    assert st.pad_initials("ABC") == "ABC"
+
+
+def test_pad_initials_empty_becomes_spaces():
+    assert st.pad_initials("") == "   "
+
+
+def test_pad_initials_none_becomes_spaces():
+    assert st.pad_initials(None) == "   "
+
+
+def test_pad_initials_already_padded_idempotent():
+    assert st.pad_initials("G  ") == "G  "
+
+
+def test_pad_initials_truncates_overlong():
+    assert st.pad_initials("ABCD") == "ABC"
+
+
 # --- clamp_cutoff ---
 def test_clamp_cutoff_zero_to_default():
     assert st.clamp_cutoff(0) == 10

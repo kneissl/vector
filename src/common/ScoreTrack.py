@@ -13,7 +13,7 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
-from score_threshold import build_seed_table, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot, matches_seeded_slot
+from score_threshold import build_seed_table, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot, matches_seeded_slot, pad_initials
 
 log = logger_instance
 
@@ -191,12 +191,11 @@ def place_machine_scores():
     """write four highest scores & initials from storage to machine memory"""
     global top_scores
 
-    # possible high score intials are empty if there was a reset / reboot etc
-    # games do not like empties!
+    # Normalize initials to the machine's 3 fixed positions. Short initials
+    # (a player who entered one or two letters) are space-padded, not blanked;
+    # empty/corrupt ones become spaces. Games do not like empties!
     for index in range(4):
-        if len(top_scores[index]["initials"]) != 3:
-            top_scores[index]["initials"] = "   "
-            # top_scores[index]["score"] = 100  only change initials, not score (blank initials happen with good scores sometimes)
+        top_scores[index]["initials"] = pad_initials(top_scores[index]["initials"])
 
     if S.gdata["HighScores"]["Type"] == 1 or S.gdata["HighScores"]["Type"] == 3:
         log.log("SCORE: Place system 11 machine scores")
