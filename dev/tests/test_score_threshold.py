@@ -146,6 +146,26 @@ def test_dedupe_missing_initials_key_treated_as_blank():
     assert [e["score"] for e in out] == [700]
 
 
+def test_dedupe_blank_dropped_when_nonblank_shares_score():
+    # the Taxi ghost: a claimed "G" row and an unclaimed blank re-read from the
+    # machine at the identical score -> the blank is the unclaimed duplicate, drop it
+    out = st.dedupe_leaderboard([L("G", 1747430), L("", 1747430)], 20)
+    assert keyed(out) == [("G", 1747430)]
+
+
+def test_dedupe_blank_kept_when_no_nonblank_shares_score():
+    # a genuine unclaimed score with no claimed twin must survive
+    out = st.dedupe_leaderboard([L("G", 1747430), L("", 900000)], 20)
+    assert set(keyed(out)) == {("G", 1747430), ("", 900000)}
+
+
+def test_dedupe_blank_dropped_prefers_highest_blank_first():
+    # blanks collapse to the highest, then that blank is dropped if a non-blank
+    # matches it; a lower blank with no twin is lost (existing collapse behavior)
+    out = st.dedupe_leaderboard([L("G", 1747430), L("", 1747430), L("", 900000)], 20)
+    assert keyed(out) == [("G", 1747430)]
+
+
 # --- build_seed_table ---
 def full_board():
     # 10 real entries, descending

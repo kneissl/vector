@@ -116,9 +116,12 @@ def dedupe_leaderboard(entries, count):
 
     The dedup key is the entry's initials, stripped and upper-cased; all blank
     initials (empty/whitespace/missing) collapse into a single "" bucket. For
-    each key the highest-scoring entry is kept. Returns up to `count` entries
-    sorted by score descending. None entries are skipped (the leaders record
-    deserializer can return None).
+    each key the highest-scoring entry is kept. A surviving blank entry is then
+    dropped if a non-blank entry shares its exact score: the blank is the
+    unclaimed version of an already-claimed score (e.g. re-read from the machine
+    high-score table every boot), not a distinct achievement. Returns up to
+    `count` entries sorted by score descending. None entries are skipped (the
+    leaders record deserializer can return None).
     """
     best = {}
     for entry in entries:
@@ -127,5 +130,12 @@ def dedupe_leaderboard(entries, count):
         key = (entry.get("initials") or "").strip().upper()
         if key not in best or entry.get("score", 0) > best[key].get("score", 0):
             best[key] = entry
+
+    blank = best.get("")
+    if blank is not None:
+        nonblank_scores = {e.get("score", 0) for k, e in best.items() if k}
+        if blank.get("score", 0) in nonblank_scores:
+            del best[""]
+
     ordered = sorted(best.values(), key=lambda e: e.get("score", 0), reverse=True)
     return ordered[:count]
