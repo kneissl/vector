@@ -226,50 +226,64 @@ def full_board():
     return [L(f"P{i}{i}{i}"[:3], (10 - i) * 1_000_000) for i in range(10)]
 
 
-def test_seed_table_honest_top_slots_and_threshold_bottom():
-    leaders = full_board()
-    out = st.build_seed_table(leaders, 10, slots=4)
+# Default award_slots=1: only the champion stays unbeatable (that slot gates the
+# per-level credit award); the rest of the table is floored at the entry
+# threshold so SEVERAL players in one game can each cascade into a low slot and
+# be prompted for initials.
+def test_seed_table_champion_honest_rest_floored():
+    out = st.build_seed_table(full_board(), 10, slots=4)
     assert out == [
-        ("P00", 10_000_000),
-        ("P11", 9_000_000),
-        ("P22", 8_000_000),
-        ("", 1_000_000),  # 10th place score gates entry
+        ("P00", 10_000_000),  # champion stays unbeatable -> gates the award
+        ("", 1_000_002),      # slots 2-4 floored just above the 10th-place score
+        ("", 1_000_001),      # so multiple players can enter in one game
+        ("", 1_000_000),      # lowest slot == 10th place (entry threshold)
     ]
 
 
-def test_seed_table_partial_board_floors_at_lowest_real_score():
-    # board not full: real entries on top, lowest slot floored at the lowest
-    # EXISTING real score (not a tiny placeholder the game would ignore as a
-    # non-high-score). Beating that floor earns an initials prompt.
-    leaders = [L("ABC", 5000), L("DEF", 4000)]
-    out = st.build_seed_table(leaders, 10, slots=4)
-    # floor = 4000 (lowest real); fillers clamp to it, never exceed the slot above
+def test_seed_table_low_slots_clustered_for_multiplayer_entry():
+    # the three low slots sit within one band of the threshold, so up to three
+    # players can cascade into them in a single game
+    out = st.build_seed_table(full_board(), 10, slots=4)
+    low = [s for _, s in out[1:]]
+    assert len(low) == 3
+    assert max(low) - min(low) <= st.SEED_BAND
+
+
+def test_seed_table_award_slots_two_keeps_top_two():
+    out = st.build_seed_table(full_board(), 10, slots=4, award_slots=2)
+    assert out[0] == ("P00", 10_000_000)
+    assert out[1] == ("P11", 9_000_000)
+    assert out[3] == ("", 1_000_000)  # two floored slots -> two players can enter
+
+
+def test_seed_table_partial_board_floor_below_champion():
+    # board not full: champion on top, lower slots floored at the lowest existing
+    # real score (a valid high-score magnitude the game honors, unlike a tiny
+    # placeholder it would ignore)
+    out = st.build_seed_table([L("ABC", 5000), L("DEF", 4000)], 10, slots=4)
     assert out[0] == ("ABC", 5000)
     assert out[-1] == ("", 4000)
-    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))  # non-increasing
-    assert out[-1][1] == 4000 and all(s <= 5000 for _, s in out)
-
-
-def test_seed_table_empty_board_all_placeholders():
-    # with NO real scores there is nothing to floor at, so fall back to tiny
-    # placeholders that let the very first score qualify
-    leaders = [L("", 0)] * 10
-    out = st.build_seed_table(leaders, 10, slots=4)
-    assert out == [("", 500), ("", 400), ("", 300), ("", 200)]
-
-
-def test_seed_table_single_real_score_floors_at_it():
-    leaders = [L("ABC", 5000)] + [L("", 0)] * 9
-    out = st.build_seed_table(leaders, 10, slots=4)
-    assert out[0] == ("ABC", 5000)
-    assert out[-1] == ("", 5000)  # floor at the only real score
     assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
 
 
-def test_seed_table_users_taxi_board_floors_at_lowest_not_placeholder():
-    # the real bug: 5 scores, cutoff 10. The old code seeded a 200 placeholder
-    # in slot 4, which the game ignored as a non-high-score, so it gated on the
-    # lowest REAL seeded score (1,747,430) and a 1,251,080 never prompted.
+def test_seed_table_empty_board_all_placeholders():
+    # no real scores: tiny placeholders so the very first scores qualify
+    out = st.build_seed_table([L("", 0)] * 10, 10, slots=4)
+    assert out == [("", 500), ("", 400), ("", 300), ("", 200)]
+
+
+def test_seed_table_single_real_score_floors_low():
+    # only a champion exists: floor the rest low so OTHER players can still enter
+    out = st.build_seed_table([L("ABC", 5000)] + [L("", 0)] * 9, 10, slots=4)
+    assert out[0] == ("ABC", 5000)
+    assert all(s < 1000 for _, s in out[1:])  # low placeholders, all beatable
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
+
+
+def test_seed_table_users_taxi_board_champion_plus_floor():
+    # the real board: champion gates the award, slots 2-4 floored at 86,300 so a
+    # multi-player game lets up to three players enter and none below the champion
+    # collects a credit
     leaders = [
         L("RAT", 5157770),
         L("TPK", 4234400),
@@ -278,29 +292,21 @@ def test_seed_table_users_taxi_board_floors_at_lowest_not_placeholder():
         L("AAA", 86300),
     ]
     out = st.build_seed_table(leaders, 10, slots=4)
-    assert out == [
-        ("RAT", 5157770),
-        ("TPK", 4234400),
-        ("G", 1747430),
-        ("", 86300),  # floor = lowest existing score; 1,251,080 > 86,300 -> prompts
-    ]
+    assert out[0] == ("RAT", 5157770)
+    assert out[-1] == ("", 86300)  # floor = lowest existing score
+    assert all(s <= 86300 + st.SEED_BAND for _, s in out[1:])  # 2-4 all beatable
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
 
 
-def test_seed_table_cutoff_3_one_phantom_filler():
-    leaders = full_board()
-    out = st.build_seed_table(leaders, 3, slots=4)
-    # honest #1/#2, filler just above threshold, threshold = #3 score
-    assert out == [
-        ("P00", 10_000_000),
-        ("P11", 9_000_000),
-        ("", 8_000_001),
-        ("", 8_000_000),
-    ]
+def test_seed_table_cutoff_3_floor_at_third():
+    out = st.build_seed_table(full_board(), 3, slots=4)
+    assert out[0] == ("P00", 10_000_000)
+    assert out[-1] == ("", 8_000_000)  # 3rd-place score is the entry floor
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
 
 
 def test_seed_table_cutoff_1_degenerates_to_band():
-    leaders = full_board()
-    out = st.build_seed_table(leaders, 1, slots=4)
+    out = st.build_seed_table(full_board(), 1, slots=4)
     assert out == [
         ("", 10_000_003),
         ("", 10_000_002),
@@ -309,42 +315,36 @@ def test_seed_table_cutoff_1_degenerates_to_band():
     ]
 
 
-def test_seed_table_tied_leaders_stay_non_increasing():
+def test_seed_table_non_increasing_with_ties():
     leaders = [L("AAA", 5000), L("BBB", 4000), L("CCC", 4000)] + [L("XXX", 100)] * 7
     out = st.build_seed_table(leaders, 3, slots=4)
     scores = [s for _, s in out]
-    assert scores == sorted(scores, reverse=True) or all(a >= b for a, b in zip(scores, scores[1:]))
-    # filler may not exceed the honest slot above it (BBB at 4000)
-    assert out[1] == ("BBB", 4000)
-    assert out[2][1] <= 4000
-    assert out[3] == ("", 4000)
+    assert all(a >= b for a, b in zip(scores, scores[1:]))
+    assert out[0] == ("AAA", 5000)
 
 
-def test_seed_table_blank_initials_leader_preserved():
-    leaders = [L("AAA", 5000), L("", 4500)] + [L("XXX", 1000)] * 8
-    out = st.build_seed_table(leaders, 10, slots=4)
-    assert out[1] == ("", 4500)
-
-
-def test_seed_table_wpc_five_slots():
-    leaders = full_board()
-    out = st.build_seed_table(leaders, 10, slots=5)
-    assert out == [
-        ("P00", 10_000_000),
-        ("P11", 9_000_000),
-        ("P22", 8_000_000),
-        ("P33", 7_000_000),
+def test_seed_table_wpc_five_slots_champion_plus_floor():
+    out = st.build_seed_table(full_board(), 10, slots=5)
+    assert len(out) == 5
+    assert out[0] == ("P00", 10_000_000)
+    assert out[-1] == ("", 1_000_000)
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
+    assert out[1:] == [
+        ("", 1_000_003),
+        ("", 1_000_002),
+        ("", 1_000_001),
         ("", 1_000_000),
     ]
 
 
 def test_seed_table_none_leader_entry_skipped():
-    # corrupt record deserializes to None -> skipped, later real entries move up
+    # corrupt record deserializes to None -> skipped, must not raise; champion
+    # and threshold still computed from the real entries
     leaders = [L("AAA", 5000), None] + [L("XXX", 1000)] * 8
     out = st.build_seed_table(leaders, 10, slots=4)
     assert out[0] == ("AAA", 5000)
-    assert out[1] == ("XXX", 1000)
-    assert out[2] == ("XXX", 1000)
+    assert out[-1] == ("", 1000)
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
 
 
 # --- matches_seeded_slot ---
