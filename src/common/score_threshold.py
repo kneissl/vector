@@ -70,16 +70,26 @@ def build_seed_table(leaders, cutoff, slots=4):
 
     Returns `slots` (initials, score) pairs in non-increasing score order:
     the real top leaderboard entries in the upper slots (so the machine's
-    per-level awards fire for genuine placement), and below them either the
-    top-N threshold score with blank initials in the lowest slot (gating
-    initials entry on making the top N) with band fillers in between, or —
-    while the board is not yet full (threshold 0) — tiny beatable
-    placeholders so every score still qualifies for initials entry while
-    landing honestly relative to the real scores. Corrupt (None) and
+    per-level awards fire for genuine placement), and in the lowest slot the
+    gating threshold with blank initials (beating it earns an initials prompt),
+    with band fillers in between. The threshold is the cutoff-th (e.g. 10th)
+    score when the board is full, or the lowest existing real score when it is
+    not yet full. Only a board with no real scores at all uses tiny
+    placeholders, so the very first score still qualifies. Corrupt (None) and
     zero-score records are skipped.
     """
     threshold = compute_threshold(leaders, cutoff)
     real = [e for e in leaders if e and e.get("score", 0) > 0]
+
+    # Not-full board (no cutoff-th score): floor the lowest slot at the lowest
+    # EXISTING real score rather than a tiny placeholder. A placeholder like 200
+    # is below the game's high-score minimum, so the ROM ignores that slot and
+    # gates the initials prompt on the lowest *real* seeded score instead — which
+    # left mid-range scores unable to prompt. A real score is a valid high-score
+    # magnitude the game honors. Only a board with no real scores at all falls
+    # back to placeholders so the very first score still qualifies.
+    if threshold <= 0 and real:
+        threshold = real[-1].get("score", 0)
 
     honest_count = min(slots - 1, cutoff - 1, len(real))
     table = [((e.get("initials") or ""), e.get("score", 0)) for e in real[:honest_count]]
@@ -94,7 +104,8 @@ def build_seed_table(leaders, cutoff, slots=4):
             table.append(("", score))
         table.append(("", threshold))
     else:
-        # board not yet full: 500/400/300/200 style placeholders (4-slot table)
+        # empty board (no real scores): tiny descending placeholders so the very
+        # first score qualifies for an initials prompt
         for index in range(honest_count, slots):
             table.append(("", (slots + 1 - index) * PLACEHOLDER_STEP))
     return table

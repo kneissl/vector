@@ -237,46 +237,52 @@ def test_seed_table_honest_top_slots_and_threshold_bottom():
     ]
 
 
-def test_seed_table_partial_board_seeds_real_scores_with_placeholders():
-    # board not full (threshold 0): honest real entries on top, tiny beatable
-    # placeholders below so every score still qualifies for initials entry
+def test_seed_table_partial_board_floors_at_lowest_real_score():
+    # board not full: real entries on top, lowest slot floored at the lowest
+    # EXISTING real score (not a tiny placeholder the game would ignore as a
+    # non-high-score). Beating that floor earns an initials prompt.
     leaders = [L("ABC", 5000), L("DEF", 4000)]
     out = st.build_seed_table(leaders, 10, slots=4)
-    assert out == [
-        ("ABC", 5000),
-        ("DEF", 4000),
-        ("", 300),
-        ("", 200),
-    ]
+    # floor = 4000 (lowest real); fillers clamp to it, never exceed the slot above
+    assert out[0] == ("ABC", 5000)
+    assert out[-1] == ("", 4000)
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))  # non-increasing
+    assert out[-1][1] == 4000 and all(s <= 5000 for _, s in out)
 
 
 def test_seed_table_empty_board_all_placeholders():
+    # with NO real scores there is nothing to floor at, so fall back to tiny
+    # placeholders that let the very first score qualify
     leaders = [L("", 0)] * 10
     out = st.build_seed_table(leaders, 10, slots=4)
     assert out == [("", 500), ("", 400), ("", 300), ("", 200)]
 
 
-def test_seed_table_partial_board_zero_score_entries_skipped():
+def test_seed_table_single_real_score_floors_at_it():
     leaders = [L("ABC", 5000)] + [L("", 0)] * 9
     out = st.build_seed_table(leaders, 10, slots=4)
-    assert out == [("ABC", 5000), ("", 400), ("", 300), ("", 200)]
+    assert out[0] == ("ABC", 5000)
+    assert out[-1] == ("", 5000)  # floor at the only real score
+    assert all(a[1] >= b[1] for a, b in zip(out, out[1:]))
 
 
-def test_seed_table_users_taxi_board_five_entries():
-    # the real case: 5 scores, cutoff 10 -> a small game must land in slot 4
+def test_seed_table_users_taxi_board_floors_at_lowest_not_placeholder():
+    # the real bug: 5 scores, cutoff 10. The old code seeded a 200 placeholder
+    # in slot 4, which the game ignored as a non-high-score, so it gated on the
+    # lowest REAL seeded score (1,747,430) and a 1,251,080 never prompted.
     leaders = [
+        L("RAT", 5157770),
         L("TPK", 4234400),
-        L("", 1747430),
         L("G", 1747430),
+        L("H", 122560),
         L("AAA", 86300),
-        L("H", 81130),
     ]
     out = st.build_seed_table(leaders, 10, slots=4)
     assert out == [
+        ("RAT", 5157770),
         ("TPK", 4234400),
-        ("", 1747430),
         ("G", 1747430),
-        ("", 200),
+        ("", 86300),  # floor = lowest existing score; 1,251,080 > 86,300 -> prompts
     ]
 
 
