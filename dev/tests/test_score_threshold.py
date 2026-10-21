@@ -163,10 +163,47 @@ def test_seed_table_honest_top_slots_and_threshold_bottom():
     ]
 
 
-def test_seed_table_returns_none_when_board_not_full():
-    # threshold 0 -> caller falls back to clear-table seeding
+def test_seed_table_partial_board_seeds_real_scores_with_placeholders():
+    # board not full (threshold 0): honest real entries on top, tiny beatable
+    # placeholders below so every score still qualifies for initials entry
     leaders = [L("ABC", 5000), L("DEF", 4000)]
-    assert st.build_seed_table(leaders, 10, slots=4) is None
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out == [
+        ("ABC", 5000),
+        ("DEF", 4000),
+        ("", 300),
+        ("", 200),
+    ]
+
+
+def test_seed_table_empty_board_all_placeholders():
+    leaders = [L("", 0)] * 10
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out == [("", 500), ("", 400), ("", 300), ("", 200)]
+
+
+def test_seed_table_partial_board_zero_score_entries_skipped():
+    leaders = [L("ABC", 5000)] + [L("", 0)] * 9
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out == [("ABC", 5000), ("", 400), ("", 300), ("", 200)]
+
+
+def test_seed_table_users_taxi_board_five_entries():
+    # the real case: 5 scores, cutoff 10 -> a small game must land in slot 4
+    leaders = [
+        L("TPK", 4234400),
+        L("", 1747430),
+        L("G", 1747430),
+        L("AAA", 86300),
+        L("H", 81130),
+    ]
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out == [
+        ("TPK", 4234400),
+        ("", 1747430),
+        ("G", 1747430),
+        ("", 200),
+    ]
 
 
 def test_seed_table_cutoff_3_one_phantom_filler():
@@ -221,10 +258,13 @@ def test_seed_table_wpc_five_slots():
     ]
 
 
-def test_seed_table_none_leader_entry_in_honest_range():
-    # corrupt record inside the honest range -> no table (fall back to clearing)
+def test_seed_table_none_leader_entry_skipped():
+    # corrupt record deserializes to None -> skipped, later real entries move up
     leaders = [L("AAA", 5000), None] + [L("XXX", 1000)] * 8
-    assert st.build_seed_table(leaders, 10, slots=4) is None
+    out = st.build_seed_table(leaders, 10, slots=4)
+    assert out[0] == ("AAA", 5000)
+    assert out[1] == ("XXX", 1000)
+    assert out[2] == ("XXX", 1000)
 
 
 # --- matches_seeded_slot ---

@@ -40,39 +40,41 @@ def compute_threshold(leaders, n):
     return score if score > 0 else 0
 
 
+PLACEHOLDER_STEP = 100  # not-full board: tiny beatable placeholders (<1000, ignored at readback)
+
+
 def build_seed_table(leaders, cutoff, slots=4):
     """Build the honest machine high-score seed table.
 
     Returns `slots` (initials, score) pairs in non-increasing score order:
     the real top leaderboard entries in the upper slots (so the machine's
-    per-level awards fire for genuine placement), band filler phantoms with
-    blank initials where cutoff < slots, and the top-N threshold score with
-    blank initials in the lowest slot (gating initials entry on making the
-    top N). Returns None when the threshold is 0 (board not yet full) or a
-    record in the honest range is corrupt — caller falls back to clearing
-    the table so every score qualifies.
+    per-level awards fire for genuine placement), and below them either the
+    top-N threshold score with blank initials in the lowest slot (gating
+    initials entry on making the top N) with band fillers in between, or —
+    while the board is not yet full (threshold 0) — tiny beatable
+    placeholders so every score still qualifies for initials entry while
+    landing honestly relative to the real scores. Corrupt (None) and
+    zero-score records are skipped.
     """
     threshold = compute_threshold(leaders, cutoff)
-    if threshold <= 0:
-        return None
+    real = [e for e in leaders if e and e.get("score", 0) > 0]
 
-    honest_count = min(slots - 1, cutoff - 1)
-    table = []
-    for i in range(honest_count):
-        entry = leaders[i]
-        if not entry:
-            return None
-        table.append(((entry.get("initials") or ""), entry.get("score", 0)))
+    honest_count = min(slots - 1, cutoff - 1, len(real))
+    table = [((e.get("initials") or ""), e.get("score", 0)) for e in real[:honest_count]]
 
-    # filler phantoms between the honest slots and the threshold slot,
-    # clamped so the table never increases downward (tied leader scores)
-    for index in range(honest_count, slots - 1):
-        score = threshold + (slots - 1 - index)
-        if table and score > table[-1][1]:
-            score = table[-1][1]
-        table.append(("", score))
-
-    table.append(("", threshold))
+    if threshold > 0:
+        # filler phantoms between the honest slots and the threshold slot,
+        # clamped so the table never increases downward (tied leader scores)
+        for index in range(honest_count, slots - 1):
+            score = threshold + (slots - 1 - index)
+            if table and score > table[-1][1]:
+                score = table[-1][1]
+            table.append(("", score))
+        table.append(("", threshold))
+    else:
+        # board not yet full: 500/400/300/200 style placeholders (4-slot table)
+        for index in range(honest_count, slots):
+            table.append(("", (slots + 1 - index) * PLACEHOLDER_STEP))
     return table
 
 

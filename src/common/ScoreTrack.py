@@ -243,9 +243,10 @@ def _remove_machine_scores():
     score with blank initials in the lowest slot. The lowest slot gates the
     initials prompt on making the top N, while players land in the slot they
     actually earned — so the game's own per-level high score awards fire for
-    genuine placement instead of every qualifier landing in 1st. When the
-    board is not yet full (threshold 0) or on-machine entry is off, fall back
-    to zeroing the slots so every score qualifies (original behavior).
+    genuine placement instead of every qualifier landing in 1st. While the
+    board is not yet full (threshold 0) the lower slots hold tiny beatable
+    placeholders instead of the threshold, so every score still qualifies but
+    lands honestly relative to the real scores. On-machine entry off: no-op.
     """
     global _seed_threshold, _seeded_slots
 
@@ -260,52 +261,34 @@ def _remove_machine_scores():
     cutoff = clamp_cutoff(DataStore.read_record("extras", 0)["top_n_cutoff"])
     leaders = [DataStore.read_record("leaders", i) for i in range(DataStore.memory_map["leaders"]["count"])]
     seed_table = build_seed_table(leaders, cutoff)
-    if seed_table is None:
-        _seed_threshold = 0  # keep the readback phantom filter consistent with what was written
-        _seeded_slots = []
-    else:
-        _seed_threshold = compute_threshold(leaders, cutoff)
-        _seeded_slots = seed_table
+    _seed_threshold = compute_threshold(leaders, cutoff)
+    _seeded_slots = seed_table
 
     if S.gdata["HighScores"]["Type"] == 1:  # system 11 type 1
         log.log("SCORE: Seed machine scores type 1, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-            if seed_table is not None:
-                initials, score = seed_table[index]
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
-                initials = (initials + "   ")[:3]
-                for i in range(3):
-                    if initials == "   ":
-                        shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
-                    else:
-                        shadowRam[initial_start + i] = ord(initials[i])  # same encoding as place_machine_scores
-            else:
-                for i in range(4):
-                    shadowRam[score_start + i] = 0  # score
-                for i in range(3):
-                    shadowRam[initial_start + i] = 0x3F  # intials
-                shadowRam[score_start + 2] = 5 - index
+            initials, score = seed_table[index]
+            shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
+            initials = (initials + "   ")[:3]
+            for i in range(3):
+                if initials == "   ":
+                    shadowRam[initial_start + i] = 0x3F  # sentinel initials -> reads blank
+                else:
+                    shadowRam[initial_start + i] = ord(initials[i])  # same encoding as place_machine_scores
 
     elif S.gdata["HighScores"]["Type"] == 3:  # system 11, type 3
         log.log("SCORE: Seed machine scores type 3, threshold=%d" % _seed_threshold)
         for index in range(4):
             score_start = S.gdata["HighScores"]["ScoreAdr"] + index * 4
             initial_start = S.gdata["HighScores"]["InitialAdr"] + index * 3
-            if seed_table is not None:
-                initials, score = seed_table[index]
-                shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
-                initials = (initials + "   ")[:3]
-                for i in range(3):
-                    # type 3 encoding; _ascii_to_type3 maps space to 0x00 (reads back blank)
-                    shadowRam[initial_start + i] = _ascii_to_type3(ord(initials[i]))
-            else:
-                for i in range(4):
-                    shadowRam[score_start + i] = 0
-                shadowRam[score_start + 2] = 5 - index
-                for i in range(3):
-                    shadowRam[initial_start + i] = 0x00
+            initials, score = seed_table[index]
+            shadowRam[score_start : score_start + 4] = _int_to_bcd(min(score, 99999999))
+            initials = (initials + "   ")[:3]
+            for i in range(3):
+                # type 3 encoding; _ascii_to_type3 maps space to 0x00 (reads back blank)
+                shadowRam[initial_start + i] = _ascii_to_type3(ord(initials[i]))
 
     elif S.gdata["HighScores"]["Type"] == 9:
         log.log("SCORE: Remove machine scores system 9")
