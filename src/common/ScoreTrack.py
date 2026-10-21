@@ -13,7 +13,7 @@ import SPI_DataStore as DataStore
 from logger import logger_instance
 from machine import RTC
 from Shadow_Ram_Definitions import shadowRam
-from score_threshold import build_seed_table, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot, matches_seeded_slot, pad_initials
+from score_threshold import build_seed_table, clamp_cutoff, compute_threshold, dedupe_leaderboard, is_phantom_slot, is_rejected_blank, matches_seeded_slot, pad_initials
 
 log = logger_instance
 
@@ -354,6 +354,12 @@ def update_leaderboard(new_entry):
     # Sanitize initials: 3 uppercase letters only
     initials = new_entry.get("initials", "")
     new_entry["initials"] = ("".join(c.upper() for c in initials if c.isalpha()))[:3]
+
+    # An unclaimed (blank) score only earns a slot when web claiming is on, so
+    # it can be claimed later. With claiming off, drop it rather than take a slot.
+    if is_rejected_blank(new_entry["initials"], DataStore.read_record("extras", 0)["claim_scores"]):
+        log.log("SCORE: drop blank score, claiming disabled")
+        return False
 
     if "date" not in new_entry:
         year, month, day, _, _, _, _, _ = rtc.datetime()

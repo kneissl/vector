@@ -41,6 +41,30 @@ def test_pad_initials_truncates_overlong():
     assert st.pad_initials("ABCD") == "ABC"
 
 
+# --- is_rejected_blank ---
+def test_rejected_blank_empty_claim_off():
+    # a no-initials score with claiming off earns no leaderboard slot
+    assert st.is_rejected_blank("", False) is True
+
+
+def test_rejected_blank_empty_claim_on():
+    # claiming on: an unclaimed blank is kept so it can be claimed later
+    assert st.is_rejected_blank("", True) is False
+
+
+def test_rejected_blank_whitespace_claim_off():
+    assert st.is_rejected_blank("   ", False) is True
+
+
+def test_rejected_blank_none_claim_off():
+    assert st.is_rejected_blank(None, False) is True
+
+
+def test_rejected_blank_real_initials_always_kept():
+    assert st.is_rejected_blank("ABC", False) is False
+    assert st.is_rejected_blank("G", False) is False
+
+
 # --- clamp_cutoff ---
 def test_clamp_cutoff_zero_to_default():
     assert st.clamp_cutoff(0) == 10

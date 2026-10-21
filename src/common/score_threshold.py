@@ -9,6 +9,17 @@ MAX_CUTOFF = 20  # leaders store capacity
 SEED_BAND = 3  # filler slots seeded just above the threshold (4-slot table -> +1,+2,+3)
 
 
+def is_rejected_blank(initials, claim_enabled):
+    """True when an unclaimed (blank) score should be kept off the leaderboard.
+
+    A score that reached the board without initials only earns a slot when web
+    claiming is enabled (so a player can claim it later). With claiming off, a
+    blank score is dropped rather than occupying a slot it can never fill.
+    Real (non-blank) scores are always kept.
+    """
+    return not (initials or "").strip() and not claim_enabled
+
+
 def pad_initials(initials):
     """Normalize initials to exactly 3 characters, right-padded with spaces.
 
