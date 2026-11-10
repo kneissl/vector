@@ -123,9 +123,26 @@ def decode_audits(mem, cfg):
             recent_minor = sum(rslots[i] * coin[i] for i in range(n_coin))
             recent_paid = rslots[n_coin]
 
-    return {
-        "total_earnings_minor": sum(slots[i] * coin[i] for i in range(n_coin)),
-        "total_paid_credits": slots[n_coin],
+    total_minor = sum(slots[i] * coin[i] for i in range(n_coin))
+    total_paid = slots[n_coin]
+
+    # Derived paid credits (opt-in per game via CreditPriceCents). Some games'
+    # own paid-credits record is not a count of credits sold: Twilight Zone 9.4
+    # adds the credits currently on the machine on EVERY coin, so coining up
+    # ten credits books 290 (snapshots/twilightzone/FINDINGS.md in the mapping
+    # workspace). Coin counts are sound, so report earnings // price instead
+    # and carry the game's own figure alongside as *_raw.
+    price = cfg.get("CreditPriceCents")
+    derived = isinstance(price, int) and price > 0
+    raw_total_paid, raw_recent_paid = total_paid, recent_paid
+    if derived:
+        total_paid = total_minor // price
+        if recent_minor is not None:
+            recent_paid = recent_minor // price
+
+    counters = {
+        "total_earnings_minor": total_minor,
+        "total_paid_credits": total_paid,
         "total_service_credits": slots[n_coin + 1] if len(slots) > n_coin + 1 else None,
         "gamesplayed": _val3(mem, cfg["GamesStartedAdr"], big, bcd),
         "minutes_on": minutes,
@@ -139,6 +156,10 @@ def decode_audits(mem, cfg):
         "recent_earnings_minor": recent_minor,
         "recent_paid_credits": recent_paid,
     }
+    if derived:
+        counters["total_paid_credits_raw"] = raw_total_paid
+        counters["recent_paid_credits_raw"] = raw_recent_paid
+    return counters
 
 
 # Counters that move on their own while the machine merely sits powered on.
@@ -203,6 +224,12 @@ def build_payload(counters, serial, software_version, collector_version):
         payload["audit"]["recent_earnings_minor"] = counters["recent_earnings_minor"]
     if counters["recent_paid_credits"] is not None:
         payload["audit"]["recent_paid_credits"] = counters["recent_paid_credits"]
+    # derived-paid-credits games: keep the game's own counter visible. context
+    # is not validated by the gateway, so these land in raw_payload only.
+    if counters.get("total_paid_credits_raw") is not None:
+        payload["context"]["paidcredits_raw"] = counters["total_paid_credits_raw"]
+    if counters.get("recent_paid_credits_raw") is not None:
+        payload["context"]["recentpaidcredits_raw"] = counters["recent_paid_credits_raw"]
     return payload
 
 

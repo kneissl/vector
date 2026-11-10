@@ -453,3 +453,71 @@ def test_wpc_payload_still_carries_service_credits():
     c = ar.decode_audits(populated_mem(), CFG)
     p = ar.build_payload(c, "12345", "The Shadow", "vector-1.11.30")
     assert p["audit"]["total_service_credits"] == 3
+
+
+# ---- derived paid credits (CreditPriceCents opt-in) ----
+
+TZ_CFG = json.load(open(REPO / "src" / "wpc" / "config" / "TwilightZone_94.json"))["Audits"]
+
+
+def test_credit_price_derives_paid_credits_and_keeps_raw():
+    cfg = dict(CFG, CreditPriceCents=50)
+    got = ar.decode_audits(populated_mem(), cfg)
+    assert got["total_earnings_minor"] == 150           # 6 coins x 25c
+    assert got["total_paid_credits"] == 3               # 150 // 50, not the game's 6
+    assert got["total_paid_credits_raw"] == 6
+    assert got["recent_paid_credits"] == 5              # 250 // 50
+    assert got["recent_paid_credits_raw"] == 5
+
+
+def test_without_credit_price_the_games_own_counter_is_reported():
+    got = ar.decode_audits(populated_mem(), CFG)
+    assert got["total_paid_credits"] == 6
+    assert "total_paid_credits_raw" not in got
+    p = ar.build_payload(got, "S", "1", "2")
+    assert "paidcredits_raw" not in p["context"]
+
+
+def test_invalid_credit_price_is_ignored():
+    for bad in (0, -100, "100", None):
+        got = ar.decode_audits(populated_mem(), dict(CFG, CreditPriceCents=bad))
+        assert got["total_paid_credits"] == 6
+        assert "total_paid_credits_raw" not in got
+
+
+def test_derived_payload_carries_raw_counter_in_context():
+    got = ar.decode_audits(populated_mem(), dict(CFG, CreditPriceCents=50))
+    p = ar.build_payload(got, "S", "1", "2")
+    assert p["audit"]["total_paid_credits"] == 3
+    assert p["audit"]["recent_paid_credits"] == 5
+    assert p["context"]["paidcredits_raw"] == 6
+    assert p["context"]["recentpaidcredits_raw"] == 5
+
+
+def test_derived_recent_stays_none_when_recent_block_unreadable():
+    mem = populated_mem()
+    mem[CFG["RecentEarningsTableAdr"] + 3] ^= 0xFF
+    got = ar.decode_audits(mem, dict(CFG, CreditPriceCents=50))
+    assert got["total_paid_credits"] == 3
+    assert got["recent_paid_credits"] is None
+    assert got["recent_paid_credits_raw"] is None
+    assert "recentpaidcredits_raw" not in ar.build_payload(got, "S", "1", "2")["context"]
+
+
+def test_decode_real_twilightzone_dump_reports_credits_sold_not_the_game_counter():
+    """101 coins at 25c on the $1/play preset; the game's own record says 317."""
+    got = ar.decode_audits(load_dump("twilightzone_94_coin_at_max.txt"), TZ_CFG)
+    assert got is not None
+    assert got["total_earnings_minor"] == 2525          # left 11 + right 90
+    assert got["total_paid_credits"] == 25
+    assert got["total_paid_credits_raw"] == 317
+    assert got["recent_paid_credits"] == 25
+    assert got["total_service_credits"] == 2
+    assert got["gamesplayed"] == 19
+    assert got["total_plays"] == 17
+    assert got["free_plays"] == 5
+    assert got["balls_played"] == 53
+    assert got["left_flips"] == 770
+    assert got["right_flips"] == 839
+    assert got["credits_on_machine"] == 10
+    assert got["money_held_minor"] == 25
