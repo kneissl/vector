@@ -27,6 +27,46 @@ def fixAdjustmentChecksum():
     return
   
 
+def _adjustmentsChecksum():
+    """return (calculated, stored, result address) for the game adjustments block, or None"""
+    adj = S.gdata.get("Adjustments", {})
+    if adj.get("Type") != 10:
+        return None
+    start = adj.get("ChecksumStartAdr", 0)
+    end = adj.get("ChecksumEndAdr", 0)
+    result = adj.get("ChecksumResultAdr", 0)
+    if start == 0 or end == 0 or result == 0:
+        return None
+    chk = 0
+    for adr in range(start, end + 1):
+        chk = chk + shadowRam[adr]
+    chk = (0xFFFF - chk) & 0xFFFF
+    return chk, (shadowRam[result] << 8) | shadowRam[result + 1], result
+
+
+def _setCustomMessageOn(value):
+    """
+    write the game's custom message on/off adjustment.
+
+    The byte sits inside the checksummed adjustments block, so the block
+    checksum has to follow it or the game sees corrupt adjustments at its next
+    power up. Only a checksum that was valid before the write is updated - a
+    block that is already invalid (or a game def with a wrong range) is left
+    alone.
+    """
+    message_adr = S.gdata["Adjustments"].get("CustomMessageOn")
+    if message_adr is None or shadowRam[message_adr] == value:
+        return
+    before = _adjustmentsChecksum()
+    shadowRam[message_adr] = value
+    if before is not None and before[0] == before[1]:
+        chk, _, result = _adjustmentsChecksum()
+        shadowRam[result] = (chk >> 8) & 0xFF
+        shadowRam[result + 1] = chk & 0xFF
+    else:
+        log.log("MSG: adjustments checksum not valid, left unchanged")
+
+
 def _fixDisplayMessageChecksum():
     if S.gdata["DisplayMessage"]["Type"] == 10: 
         chk = 0
@@ -73,10 +113,8 @@ def _set(ipAddress):
 
         print("MSG: set display message ", padded_ip)
 
-        message_adr = S.gdata["Adjustments"].get("CustomMessageOn")
-        if message_adr is not None:
-            shadowRam[message_adr] = 1
-        
+        _setCustomMessageOn(1)
+
         _fixDisplayMessageChecksum()
 
 
@@ -121,9 +159,7 @@ def refresh():
     if show_ip_last_state==1 and DataStore.read_record("extras", 0)["show_ip_address"]==0:
         # turn off custom message                
         _blank()        
-        message_adr = S.gdata["Adjustments"].get("CustomMessageOn")
-        if message_adr is not None:
-            shadowRam[message_adr] = 0
+        _setCustomMessageOn(0)
         _fixDisplayMessageChecksum()
         print("MSG: turned off")
         
